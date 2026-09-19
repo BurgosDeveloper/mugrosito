@@ -12,7 +12,7 @@ function interfacePriority(name) {
 }
 
 function getLanConnectionInfo(port = 3001) {
-  const configuredIp = (process.env.CRISPY_LAN_IP || process.env.BASILICO_LAN_IP || '').trim();
+  const configuredIp = (process.env.MUGROSITO_LAN_IP || process.env.CRISPY_LAN_IP || process.env.BASILICO_LAN_IP || '').trim();
   if (PRIVATE_IPV4.test(configuredIp)) {
     return {
       lanIp: configuredIp,

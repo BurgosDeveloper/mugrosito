@@ -15,20 +15,20 @@ module.exports = function(io) {
       const userClean = (username || '').trim().toLowerCase();
       const passClean = (password || '').trim().toLowerCase();
 
-      // Cuentas oficiales Crispy
-      if (userClean === 'carlos' && passClean === 'carloscrispys') {
-        return loginResponse(res, { username: 'Carlos', role: 'admin' });
+      // Cuentas oficiales Mugrosito
+      if (userClean === 'linda' && passClean === 'lindamugrosito') {
+        return loginResponse(res, { username: 'Linda', role: 'admin' });
       }
 
-      if (userClean === 'cajeroa' && passClean === 'cajero') {
-        return loginResponse(res, { username: 'Cajero Principal', role: 'caja' });
+      if (userClean === 'cajero' && passClean === 'cajero') {
+        return loginResponse(res, { username: 'Cajero', role: 'caja' });
       }
 
-      if (userClean === 'mesero' && (passClean === 'mesero' || passClean === 'carloscrispys')) {
+      if (userClean === 'mesero' && (passClean === 'mesero' || passClean === 'lindamugrosito')) {
         return loginResponse(res, { username: 'Mesero Principal', role: 'mesero' });
       }
 
-      if (userClean === 'cocina' && (passClean === 'cocina' || passClean === 'carloscrispys')) {
+      if (userClean === 'cocina' && (passClean === 'cocina' || passClean === 'lindamugrosito')) {
         return loginResponse(res, { username: 'Jefe de Cocina', role: 'cocina' });
       }
 
@@ -109,7 +109,7 @@ module.exports = function(io) {
     if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
       token = authHeader.substring(7).trim();
     } else {
-      token = req.get('x-crispy-token') || req.get('x-basilico-session');
+      token = req.get('x-mugrosito-token') || req.get('x-crispy-token') || req.get('x-basilico-session');
     }
 
     const { getSession } = require('../helpers/sessionAuth');

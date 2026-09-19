@@ -506,8 +506,10 @@ function reportAmounts(payment) {
   let bs = Number(payment.cashTenderedBs) || 0;
   const paidUSD = Number(payment.amountPaidUSD) || 0;
   if (usd === 0 && cop === 0 && bs === 0 && paidUSD > 0) {
-    if (['Efectivo COP', 'Bancolombia', 'Nequi'].includes(payment.paymentMethod)) cop = paidUSD * (Number(payment.copRate) || 3950);
-    else if (['Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito'].includes(payment.paymentMethod)) bs = paidUSD * (Number(payment.bsRate) || 36.5);
+    const cRate = Number(payment.copRate) || 3100;
+    const bRate = Number(payment.bsRate) || 3.2;
+    if (['Efectivo COP', 'Bancolombia', 'Nequi'].includes(payment.paymentMethod)) cop = paidUSD * cRate;
+    else if (['Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito'].includes(payment.paymentMethod)) bs = bRate > 0 ? (paidUSD * cRate) / bRate : 0;
     else usd = paidUSD;
   }
   return { usd, cop, bs };
@@ -522,13 +524,16 @@ function reportSaleAmounts(payment) {
   const changeCOP = Number(payment.changeGivenCOP) || 0;
   const changeBs = Number(payment.changeGivenBs) || 0;
 
+  const cRate = Number(payment.copRate) || 3100;
+  const bRate = Number(payment.bsRate) || 3.2;
+
   let usd = 0;
   let cop = 0;
   let bs = 0;
   if (['Efectivo COP', 'Bancolombia', 'Nequi', 'Binance COP'].includes(payment.paymentMethod)) {
-    cop = tenderCOP > 0 ? (tenderCOP - changeCOP) : (paidUSD * (Number(payment.copRate) || 3950));
+    cop = tenderCOP > 0 ? (tenderCOP - changeCOP) : (paidUSD * cRate);
   } else if (['Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito'].includes(payment.paymentMethod)) {
-    bs = tenderBs > 0 ? (tenderBs - changeBs) : (paidUSD * (Number(payment.bsRate) || 36.5));
+    bs = tenderBs > 0 ? (tenderBs - changeBs) : (bRate > 0 ? (paidUSD * cRate) / bRate : 0);
   } else {
     usd = tenderUSD > 0 ? (tenderUSD - changeUSD) : paidUSD;
   }
@@ -591,7 +596,7 @@ function addReportHeader(lines, title, data, width = LINE_WIDTH, formatSetup = P
     formatSetup,
     '\x1Ba\x01',
     '\x1BE\x01',
-    centered('CRISPY BURGER', width),
+    centered('MUGROSITO', width),
     centered(title, width),
     '\x1BE\x00',
     `EMITIDO: ${reportTimestamp(new Date().toISOString())}`,
@@ -600,7 +605,7 @@ function addReportHeader(lines, title, data, width = LINE_WIDTH, formatSetup = P
   );
   lines.push(...wrapText(`DESDE: ${reportTimestamp(data?.dateRange?.from)}`, width));
   lines.push(...wrapText(`HASTA: ${reportTimestamp(data?.dateRange?.to)}`, width));
-  lines.push(...wrapText(`TASAS: 1 USD = ${Number(data?.exchangeRates?.COP) || 3950} COP | ${Number(data?.exchangeRates?.Bs) || 36.5} Bs`, width));
+  lines.push(...wrapText(`TASAS: 1 USD = ${Number(data?.exchangeRates?.COP) || 3100} COP | 1 Bs = ${Number(data?.exchangeRates?.Bs) || 3.2} COP`, width));
 }
 
 function getReportBaseProductName(item = {}) {
@@ -625,8 +630,9 @@ function buildReportTicket(reportType, data) {
 
   const titles = {
     contable: 'REPORTE CONTABLE',
-    pizzas: 'HAMBURGUESAS VENDIDAS',
-    hamburguesas: 'HAMBURGUESAS VENDIDAS',
+    pizzas: 'HAMBURGUESAS E ÍTEMS VENDIDOS',
+    hamburguesas: 'HAMBURGUESAS E ÍTEMS VENDIDOS',
+    hotdogs: 'HAMBURGUESAS E ÍTEMS VENDIDOS',
     ingresos: 'INGRESOS Y COBROS',
     egresos: 'VUELTOS Y EGRESOS',
     cocina: 'REPORTE DE COCINA',
@@ -641,13 +647,14 @@ function buildReportTicket(reportType, data) {
   const lines = [];
   addReportHeader(lines, title, data, reportWidth, formatSetup);
 
-  if (reportType === 'pizzas' || reportType === 'hamburguesas') {
+  if (reportType === 'pizzas' || reportType === 'hamburguesas' || reportType === 'hotdogs') {
     const grouped = new Map();
 
     // 1. Productos y Adicionales
     for (const item of data.items || []) {
+      const ordCopRate = Number(item.copRate) || Number(data.exchangeRates?.COP) || 3100;
       const catLower = (item.category || '').toLowerCase();
-      const isBurger = catLower.includes('burger') || catLower.includes('hamburguesa') || (item.productName || '').toLowerCase().includes('burger') || (item.productName || '').toLowerCase().includes('crispy');
+      const isComida = catLower.includes('burger') || catLower.includes('hamburguesa') || catLower.includes('hot dog') || catLower.includes('perro') || catLower.includes('mugrosito') || (item.productName || '').toLowerCase().includes('burger') || (item.productName || '').toLowerCase().includes('hot dog') || (item.productName || '').toLowerCase().includes('perro') || (item.productName || '').toLowerCase().includes('mugrosito');
       const fullName = getReportBaseProductName(item);
       const itQty = Number(item.quantity) || 1;
 
@@ -662,49 +669,94 @@ function buildReportTicket(reportType, data) {
         } catch (e) {}
       }
 
-      let paidExtrasUnitCost = 0;
+      let paidExtrasUnitCostUSD = 0;
+      let paidExtrasUnitCostCOP = 0;
       for (const extra of extrasList) {
-        const extraPrice = Number(extra.price) || 0;
+        const rawExtraPrice = Number(extra.price) || 0;
         const extraName = (extra.name || 'Adicional').trim();
-        if (extraPrice > 0) {
-          paidExtrasUnitCost += extraPrice;
+        if (rawExtraPrice > 0) {
+          let extraUSD = Number(extra.priceUSD);
+          let extraCOP = Number(extra.priceCOP);
+          if (isNaN(extraUSD) || isNaN(extraCOP) || extraUSD === 0) {
+            if (rawExtraPrice >= 100) {
+              extraCOP = rawExtraPrice;
+              extraUSD = ordCopRate > 0 ? rawExtraPrice / ordCopRate : 0;
+            } else {
+              extraUSD = rawExtraPrice;
+              extraCOP = rawExtraPrice * ordCopRate;
+            }
+          }
+          paidExtrasUnitCostUSD += extraUSD;
+          paidExtrasUnitCostCOP += extraCOP;
           const extraKey = `Adicionales|ADD ${extraName}`;
-          const currentExtra = grouped.get(extraKey) || { category: 'Adicionales', name: `ADD ${extraName}`, quantity: 0, totalUSD: 0 };
+          const currentExtra = grouped.get(extraKey) || { category: 'Adicionales', name: `ADD ${extraName}`, quantity: 0, totalUSD: 0, totalCOP: 0 };
           currentExtra.quantity += itQty;
-          currentExtra.totalUSD += extraPrice * itQty;
+          currentExtra.totalUSD += extraUSD * itQty;
+          currentExtra.totalCOP += extraCOP * itQty;
           grouped.set(extraKey, currentExtra);
         }
       }
 
       const rawPrice = Number(item.price) || 0;
-      const baseUnitPrice = Math.max(0, rawPrice - paidExtrasUnitCost);
-      const category = isBurger ? 'Hamburguesas' : (item.category || 'Sin categoria');
+      let itPriceUSD = Number(item.priceUSD);
+      let itPriceCOP = Number(item.priceCOP);
+      if (isNaN(itPriceUSD) || isNaN(itPriceCOP) || itPriceUSD === 0) {
+        if (rawPrice >= 100) {
+          itPriceCOP = rawPrice;
+          itPriceUSD = ordCopRate > 0 ? rawPrice / ordCopRate : 0;
+        } else {
+          itPriceUSD = rawPrice;
+          itPriceCOP = rawPrice * ordCopRate;
+        }
+      }
+
+      const baseUnitPriceUSD = Math.max(0, itPriceUSD - paidExtrasUnitCostUSD);
+      const baseUnitPriceCOP = Math.max(0, itPriceCOP - paidExtrasUnitCostCOP);
+      const category = isComida ? 'Hot Dogs' : (item.category || 'Sin categoria');
       const key = `${category}|${fullName}`;
-      const current = grouped.get(key) || { category, name: fullName, quantity: 0, totalUSD: 0 };
+      const current = grouped.get(key) || { category, name: fullName, quantity: 0, totalUSD: 0, totalCOP: 0 };
       current.quantity += itQty;
-      current.totalUSD += baseUnitPrice * itQty;
+      current.totalUSD += baseUnitPriceUSD * itQty;
+      current.totalCOP += baseUnitPriceCOP * itQty;
       grouped.set(key, current);
     }
 
     // 2. Servicios de Delivery Facturados
     for (const ord of (data.orders || [])) {
-      const fee = Number(ord.deliveryFeeUSD) || 0;
-      if (fee > 0 || ord.type === 'delivery') {
-        const fullName = fee > 0 ? `Servicio Delivery ($${fee.toFixed(2)})` : 'Servicio Delivery';
+      const ordCopRate = Number(ord.copRateAtPayment) || Number(data.exchangeRates?.COP) || 3100;
+      let feeUSD = Number(ord.deliveryFeeUSD || ord.delivery_fee_usd || 0);
+      let feeCOP = Number(ord.deliveryFeeCOP || ord.delivery_fee_cop || 0);
+      if (feeCOP === 0 && feeUSD > 0) {
+        if (feeUSD >= 100) {
+          feeCOP = feeUSD;
+          feeUSD = ordCopRate > 0 ? feeUSD / ordCopRate : 0;
+        } else {
+          feeCOP = feeUSD * ordCopRate;
+        }
+      } else if (feeUSD === 0 && feeCOP > 0) {
+        feeUSD = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
+      } else if (feeUSD >= 100 && feeCOP > 0) {
+        feeUSD = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
+      }
+
+      if (feeUSD > 0 || feeCOP > 0 || ord.type === 'delivery') {
+        const fullName = feeCOP > 0 ? `Servicio Delivery (${roundCOP(feeCOP).toLocaleString('es-CO')} COP)` : 'Servicio Delivery';
         const category = 'Delivery';
         const key = `${category}|${fullName}`;
-        const current = grouped.get(key) || { category, name: fullName, quantity: 0, totalUSD: 0 };
+        const current = grouped.get(key) || { category, name: fullName, quantity: 0, totalUSD: 0, totalCOP: 0 };
         current.quantity += 1;
-        current.totalUSD += fee;
+        current.totalUSD += feeUSD;
+        current.totalCOP += feeCOP;
         grouped.set(key, current);
       }
     }
     const items = [...grouped.values()].sort((left, right) => left.category.localeCompare(right.category) || left.name.localeCompare(right.name));
     const totalUnits = items.reduce((total, item) => total + item.quantity, 0);
     const totalUSD = items.reduce((total, item) => total + item.totalUSD, 0);
+    const totalCOP = items.reduce((total, item) => total + (item.totalCOP || 0), 0);
     addSection(lines, 'DETALLE DE ITEMS FACTURADOS');
     if (items.length === 0) {
-      lines.push('SIN HAMBURGUESAS, BEBIDAS O ADICIONALES');
+      lines.push('SIN COMIDAS, BEBIDAS O ADICIONALES');
     } else {
       let category = '';
       for (const item of items) {
@@ -713,16 +765,18 @@ function buildReportTicket(reportType, data) {
           lines.push('', ...wrapText(`CATEGORIA: ${category}`));
         }
         lines.push(...wrapText(`${item.quantity}x ${item.name}`, LINE_WIDTH, '  '));
-        lines.push(`  SUBTOTAL: $${item.totalUSD.toFixed(2)} USD`);
+        lines.push(`  SUBTOTAL: $${item.totalUSD.toFixed(2)} USD / ${Math.round(item.totalCOP || 0).toLocaleString('es-CO')} COP`);
       }
     }
     addSection(lines, 'RESUMEN DE VENTAS');
     const rates = data.exchangeRates || {};
     lines.push(`PRODUCTOS DIFERENTES: ${items.length}`, `UNIDADES FACTURADAS: ${totalUnits}`, 'TOTAL PRODUCTOS:');
+    const copVal = totalCOP > 0 ? totalCOP : totalUSD * (Number(rates.COP) || 3100);
+    const bsR = Number(rates.Bs) || 3.2;
     addAmountLines(lines, {
       usd: totalUSD,
-      cop: totalUSD * (Number(rates.COP) || 3950),
-      bs: totalUSD * (Number(rates.Bs) || 36.5),
+      cop: copVal,
+      bs: bsR > 0 ? copVal / bsR : 0,
     }, '  ', true);
   } else if (reportType === 'ingresos') {
     const totals = { usd: 0, cop: 0, bs: 0 };
@@ -796,8 +850,8 @@ function buildReportTicket(reportType, data) {
     lines.push(`COMANDAS: ${(data.orders || []).length}`, `ITEMS FACTURADOS: ${(data.items || []).reduce((total, item) => total + (Number(item.quantity) || 0), 0)}`);
   } else {
     // REPORTE CONTABLE CONSOLIDADO
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3950;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 36.5;
+    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
 
     const billedTotals = { usd: 0, cop: 0, bs: 0 };
     const byMethod = new Map();
@@ -816,7 +870,7 @@ function buildReportTicket(reportType, data) {
       if (tenderUSD === 0 && tenderCOP === 0 && tenderBs === 0 && paidUSD > 0) {
         if (curr === 'USD') tenderUSD = paidUSD;
         else if (curr === 'COP') tenderCOP = paidUSD * cRate;
-        else if (curr === 'Bs') tenderBs = paidUSD * bRate;
+        else if (curr === 'Bs') tenderBs = bRate > 0 ? (paidUSD * cRate) / bRate : 0;
       }
 
       const changeUSD = Number(payment.changeGivenUSD) || 0;
@@ -905,8 +959,15 @@ function buildReportTicket(reportType, data) {
     const cashOrders = (data.orders || []).filter((o) => o.paymentStatus === 'pagado' && o.paymentMethod !== 'Crédito');
     const deliveryMap = new Map();
     for (const ord of billedOrders) {
-      const fee = Number(ord.deliveryFeeUSD) || 0;
-      if (ord.type === 'delivery' || fee > 0) {
+      const ordCopRate = Number(ord.copRateAtPayment) || copRateGlobal;
+      let fee = Number(ord.deliveryFeeUSD || ord.delivery_fee_usd) || 0;
+      const feeCOP = Number(ord.deliveryFeeCOP || ord.delivery_fee_cop) || 0;
+      if (feeCOP > 0 && (fee === 0 || fee >= 100)) {
+        fee = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
+      } else if (fee >= 100) {
+        fee = ordCopRate > 0 ? fee / ordCopRate : 0;
+      }
+      if (ord.type === 'delivery' || fee > 0 || feeCOP > 0) {
         deliveryMap.set(fee, (deliveryMap.get(fee) || 0) + 1);
       }
     }
@@ -1000,15 +1061,20 @@ function buildReportTicket(reportType, data) {
         } catch (e) {}
       }
 
-      let paidExtrasUnitCost = 0;
+      const itCopRate = Number(it.copRate) || copRateGlobal;
+      let paidExtrasUnitCostUSD = 0;
       for (const extra of extrasList) {
-        const extraPrice = Number(extra.price) || 0;
+        const rawExtraPrice = Number(extra.price) || 0;
         const extraName = (extra.name || 'Adicional').trim();
-        if (extraPrice > 0) {
-          paidExtrasUnitCost += extraPrice;
+        if (rawExtraPrice > 0) {
+          let extraUSD = Number(extra.priceUSD);
+          if (isNaN(extraUSD) || extraUSD === 0) {
+            extraUSD = rawExtraPrice >= 100 ? (itCopRate > 0 ? rawExtraPrice / itCopRate : 0) : rawExtraPrice;
+          }
+          paidExtrasUnitCostUSD += extraUSD;
           const current = paidExtrasMap.get(extraName) || { name: `ADD ${extraName}`, quantity: 0, subtotalUSD: 0 };
           current.quantity += itQty;
-          current.subtotalUSD += extraPrice * itQty;
+          current.subtotalUSD += extraUSD * itQty;
           paidExtrasMap.set(extraName, current);
         } else {
           freeToppingsCount += itQty;
@@ -1016,7 +1082,11 @@ function buildReportTicket(reportType, data) {
       }
 
       const rawPrice = Number(it.price) || 0;
-      const baseUnitPrice = Math.max(0, rawPrice - paidExtrasUnitCost);
+      let itPriceUSD = Number(it.priceUSD);
+      if (isNaN(itPriceUSD) || itPriceUSD === 0) {
+        itPriceUSD = rawPrice >= 100 ? (itCopRate > 0 ? rawPrice / itCopRate : 0) : rawPrice;
+      }
+      const baseUnitPrice = Math.max(0, itPriceUSD - paidExtrasUnitCostUSD);
       const baseSubtotal = baseUnitPrice * itQty;
 
       const catLower = (it.category || '').toLowerCase().trim();
@@ -1150,7 +1220,7 @@ function buildReportTicket(reportType, data) {
     lines.push('\x1BE\x00');
   }
 
-  lines.push('', divider('=', reportWidth), centered('FIN DEL REPORTE', reportWidth), centered('CRISPY BURGER', reportWidth), PRINT_FORMAT_RESET, '\n\n\n\x1DV\x00');
+  lines.push('', divider('=', reportWidth), centered('FIN DEL REPORTE', reportWidth), centered('MUGROSITO', reportWidth), PRINT_FORMAT_RESET, '\n\n\n\x1DV\x00');
   return Buffer.from(lines.join('\n'), 'ascii');
 }
 
@@ -1233,6 +1303,7 @@ function buildKitchenTicket(order, isFallback = false) {
 
   lines.push(
     '\x1Ba\x01',
+    kitchenCentered('MUGROSITO'),
     `COMANDA: #${printableText(order.orderNumber)}`,
     '\x1Ba\x00',
     `HORA: ${formatKitchenTime(order.createdAt)}`,
@@ -1312,6 +1383,7 @@ function buildKitchenAdditionTicket(order, addedItems, isFallback = false) {
 
   lines.push(
     '\x1Ba\x01',
+    kitchenCentered('MUGROSITO'),
     'ADICION COCINA',
     `COMANDA: #${printableText(order.orderNumber)}`,
     '\x1Ba\x00',
@@ -1515,7 +1587,7 @@ function buildTestTicket(printerName, config) {
     PRINT_FORMAT_SETUP,
     '\x1Ba\x01',
     '\x1BE\x01',
-    centered('CRISPY BURGER', width),
+    centered('MUGROSITO', width),
     centered('--- PRUEBA DE CONEXION ---', width),
     '\x1BE\x00',
     '\x1Ba\x00',
@@ -1657,8 +1729,8 @@ async function printKitchenAdditionTicket(order, addedItems, targetPrinter = 'co
 
 function buildReceiptTicket(order, rates = {}) {
   // Priorizar las tasas enviadas explícitamente desde el sistema / UI, luego las guardadas en la comanda, luego las del turno
-  const copRate = Number(rates.COP || order.copRateAtPayment || order.copRate || 3950);
-  const bsRate = Number(rates.Bs || order.bsRateAtPayment || order.bsRate || 36.5);
+  const copRate = Number(rates.COP || order.copRateAtPayment || order.copRate || 3100);
+  const bsRate = Number(rates.Bs || order.bsRateAtPayment || order.bsRate || 3.2);
   const totalUSD = Number(order.totalUSD || 0);
   const cleanOrderNumber = printableText((order.orderNumber || '').toString().replace(/^#+/, ''));
 
@@ -1678,7 +1750,7 @@ function buildReceiptTicket(order, rates = {}) {
     PRINT_FORMAT_SETUP,
     '\x1Ba\x01',
     '\x1BE\x01',
-    'CRISPY BURGER',
+    'MUGROSITO',
     'PRE-CUENTA / CONSUMO',
     '\x1BE\x00',
     '\x1Ba\x00',
@@ -1701,7 +1773,7 @@ function buildReceiptTicket(order, rates = {}) {
       .replace(/\s*\((Grande|Pequeña|Mediana|Familiar|Estándar|Modificada|Modificado)\)/gi, '')
       .trim());
     const unitPrice = Number(it.price) || 0;
-    const lineTotalUSD = unitPrice * qty;
+    const lineTotalCOP = unitPrice * qty;
 
     let packagingTag = '';
     if (order.type !== 'delivery') {
@@ -1714,7 +1786,7 @@ function buildReceiptTicket(order, rates = {}) {
       }
     }
 
-    const priceCol = `€${lineTotalUSD.toFixed(2)}`;
+    const priceCol = `${Math.round(lineTotalCOP).toLocaleString('es-CO')}`;
     const maxLeft = Math.max(1, LINE_WIDTH - priceCol.length - 1);
     const combinedLine = `${qty}x ${cleanName}${packagingTag}`;
     if (packagingTag && combinedLine.length > maxLeft) {
@@ -1747,22 +1819,30 @@ function buildReceiptTicket(order, rates = {}) {
         const rawName = printableText(ex.name || 'Adicional');
         const cleanName = rawName.replace(/^\d+x\s*/i, '').trim();
         const label = exQty > 1 ? `${exQty}x ${cleanName}` : cleanName;
-        lines.push(`  + ADD ${label} (€${(exPrice * qty).toFixed(2)})`);
+        lines.push(`  + ADD ${label} (${Math.round(exPrice * qty).toLocaleString('es-CO')})`);
       }
     }
   }
 
-  const deliveryFee = Number(order.deliveryFeeUSD || order.delivery_fee_usd || 0);
-  if (deliveryFee > 0) {
-    lines.push(formatTwoColumns('1x SERVICIO DELIVERY', `€${deliveryFee.toFixed(2)}`));
+  let deliveryFeeCOP = Number(order.deliveryFeeCOP || order.delivery_fee_cop || 0);
+  if (deliveryFeeCOP === 0) {
+    const rawFee = Number(order.deliveryFeeUSD || order.delivery_fee_usd || 0);
+    deliveryFeeCOP = rawFee >= 100 ? rawFee : rawFee * copRate;
   }
+  if (deliveryFeeCOP > 0) {
+    lines.push(formatTwoColumns('1x SERVICIO DELIVERY', `${Math.round(deliveryFeeCOP).toLocaleString('es-CO')}`));
+  }
+
+  const totalCOPVal = Number(order.totalCOP || order.total_cop || Math.round(totalUSD * copRate));
+  const totalUSDVal = copRate > 0 ? (totalCOPVal / copRate) : totalUSD;
+  const totalBsVal = bsRate > 0 ? (totalCOPVal / bsRate).toFixed(2) : '0.00';
 
   lines.push(divider('-'));
   // Montos gigantes tamaño comanda de cocina (Doble Alto + Doble Ancho + Negrita)
   lines.push('\x1B \x00\x1B3\x26\x1BM\x00\x1D!\x11\x1BE\x01');
-  lines.push(formatTwoColumns('TOTAL EUR:', `€${totalUSD.toFixed(2)}`, KITCHEN_LINE_WIDTH));
-  lines.push(formatTwoColumns('TOTAL COP:', `${roundCOP(totalUSD * copRate).toLocaleString('en-US')}`, KITCHEN_LINE_WIDTH));
-  lines.push(formatTwoColumns('TOTAL Bs:', `${(totalUSD * bsRate).toFixed(2)}`, KITCHEN_LINE_WIDTH));
+  lines.push(formatTwoColumns('TOTAL COP:', `${Math.round(totalCOPVal).toLocaleString('es-CO')}`, KITCHEN_LINE_WIDTH));
+  lines.push(formatTwoColumns('TOTAL USD:', `$${totalUSDVal.toFixed(2)}`, KITCHEN_LINE_WIDTH));
+  lines.push(formatTwoColumns('TOTAL Bs:', `${totalBsVal}`, KITCHEN_LINE_WIDTH));
   lines.push('\x1D!\x00\x1BE\x00', PRINT_FORMAT_RESET, PRINT_FORMAT_SETUP);
   lines.push(divider('-'));
   lines.push('\x1Ba\x01');
@@ -1785,7 +1865,7 @@ function buildCrispysCierreTicket(data) {
     PRINT_FORMAT_SETUP,
     '\x1Ba\x01',
     '\x1BE\x01',
-    centered('CRISPYS CIERRE'),
+    centered('MUGROSITO CIERRE'),
     '\x1BE\x00',
     '\x1Ba\x00',
     divider('='),
@@ -1806,8 +1886,8 @@ function buildCrispysCierreTicket(data) {
   lines.push(divider('-'));
 
   // Calcular los totales de cada método de pago con la MISMA lógica exacta de Sección 3 del reporte digital (reportService.ts)
-  const copRateGlobal = Number(data.exchangeRates?.COP) || 3950;
-  const bsRateGlobal = Number(data.exchangeRates?.Bs) || 36.5;
+  const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+  const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
 
   const methodNames = [
     'Efectivo USD',
@@ -1854,7 +1934,7 @@ function buildCrispysCierreTicket(data) {
     if (tenderUSD === 0 && tenderCOP === 0 && tenderBs === 0 && paidUSD > 0) {
       if (curr === 'USD') tenderUSD = paidUSD;
       else if (curr === 'COP') tenderCOP = paidUSD * cRate;
-      else if (curr === 'Bs') tenderBs = paidUSD * bRate;
+      else if (curr === 'Bs') tenderBs = bRate > 0 ? (paidUSD * cRate) / bRate : 0;
     }
 
     const changeUSD = Number(payment.changeGivenUSD) || 0;
@@ -1926,19 +2006,21 @@ function buildCrispysCierreTicket(data) {
     }
   }
 
-  // Si payments está vacío pero data.paymentMethods viene poblado (ej. desde cierre)
-  if (payments.length === 0 && Array.isArray(data.paymentMethods)) {
-    for (const m of data.paymentMethods) {
-      const name = m.payment_method;
+  // Si payments está vacío pero data.paymentMethods o data.byMethod viene poblado (ej. desde cierre o resumen)
+  if (payments.length === 0 && (Array.isArray(data.paymentMethods) || Array.isArray(data.byMethod))) {
+    const list = Array.isArray(data.paymentMethods) ? data.paymentMethods : data.byMethod;
+    for (const m of list) {
+      const name = m.payment_method || m.method || m.paymentMethod;
+      if (!name) continue;
       const curr = reportPaymentCurrency(name);
       let net = 0;
-      if (curr === 'COP') net = parseFloat(m.total_cop) || 0;
-      else if (curr === 'Bs') net = parseFloat(m.total_bs) || 0;
-      else net = parseFloat(m.total_usd) || 0;
+      if (curr === 'COP') net = parseFloat(m.total_cop ?? m.amountCOP) || (parseFloat(m.amountUSD ?? m.total_usd) ? parseFloat(m.amountUSD ?? m.total_usd) * copRateGlobal : 0);
+      else if (curr === 'Bs') net = parseFloat(m.total_bs ?? m.amountBs) || (parseFloat(m.amountUSD ?? m.total_usd) && bsRateGlobal > 0 ? (parseFloat(m.amountUSD ?? m.total_usd) * copRateGlobal) / bsRateGlobal : 0);
+      else net = parseFloat(m.total_usd ?? m.amountUSD) || 0;
 
       let totals = methodTotals.get(name);
       if (!totals) {
-        totals = { currency: curr, incomeNative: net, changeNative: 0, netNative: net, netUSD: parseFloat(m.total_usd) || 0, count: parseInt(m.count, 10) || 1 };
+        totals = { currency: curr, incomeNative: net, changeNative: 0, netNative: net, netUSD: parseFloat(m.total_usd ?? m.amountUSD) || 0, count: parseInt(m.count, 10) || 1 };
         methodTotals.set(name, totals);
       } else {
         totals.incomeNative = net;
@@ -1953,7 +2035,7 @@ function buildCrispysCierreTicket(data) {
     totals.netNative = totals.incomeNative - totals.changeNative;
     if (totals.currency === 'USD') totals.netUSD = totals.netNative;
     else if (totals.currency === 'COP') totals.netUSD = totals.netNative / copRateGlobal;
-    else if (totals.currency === 'Bs') totals.netUSD = totals.netNative / bsRateGlobal;
+    else if (totals.currency === 'Bs') totals.netUSD = copRateGlobal > 0 ? (totals.netNative * bsRateGlobal) / copRateGlobal : 0;
   }
 
   // 2. CIERRE: Efectivo que debe haber en gaveta física
@@ -2123,7 +2205,9 @@ function buildCrispysCierreTicket(data) {
   // 9. CREDITOS: Deudores
   lines.push('\x1Ba\x01', '\x1BE\x01', 'CREDITOS', '\x1BE\x00', '\x1Ba\x00');
   lines.push(formatTwoColumns('DEUDOR', 'MONTO'));
-  const creditOrders = (data.orders || []).filter((o) => o.paymentStatus === 'credito');
+  const creditOrders = (Array.isArray(data.creditOrders) && data.creditOrders.length > 0)
+    ? data.creditOrders
+    : (data.orders || []).filter((o) => o.paymentStatus === 'credito');
   if (creditOrders.length === 0) {
     if (Number(data.creditsUSD) > 0) {
       lines.push(formatTwoColumns('CREDITOS TURNO', `${Number(data.creditsUSD).toFixed(2)}$`));
@@ -2149,6 +2233,7 @@ function buildCrispysCierreTicket(data) {
   let totalItemsUSD = 0;
 
   for (const item of (data.items || [])) {
+    const ordCopRate = Number(item.copRate) || Number(data.exchangeRates?.COP) || copRateGlobal;
     const rawCat = (item.category || '').toLowerCase();
     const rawName = (item.productName || item.name || '').trim();
     const itQty = Number(item.quantity) || 1;
@@ -2165,24 +2250,33 @@ function buildCrispysCierreTicket(data) {
       } catch (e) {}
     }
 
-    let paidExtrasCost = 0;
+    let paidExtrasCostUSD = 0;
     for (const ex of extrasList) {
-      const exPrice = Number(ex.price) || 0;
+      const rawExPrice = Number(ex.price) || 0;
       const exQty = Number(ex.quantity) || 1;
       const rawName = (ex.name || 'Adicional').trim();
       const cleanBaseName = rawName.replace(/^\d+x\s*/i, '').trim().toUpperCase();
-      if (exPrice > 0) {
-        paidExtrasCost += exPrice;
+      if (rawExPrice > 0) {
+        let exUSD = Number(ex.priceUSD);
+        if (isNaN(exUSD) || exUSD === 0) {
+          exUSD = rawExPrice >= 100 ? (ordCopRate > 0 ? rawExPrice / ordCopRate : 0) : rawExPrice;
+        }
+        paidExtrasCostUSD += exUSD;
         const extraKey = `ADD ${cleanBaseName}`;
         const currExtra = otroGroup.get(extraKey) || { name: extraKey, quantity: 0, totalUSD: 0 };
         currExtra.quantity += itQty * exQty;
-        currExtra.totalUSD += exPrice * itQty;
+        currExtra.totalUSD += exUSD * itQty;
         otroGroup.set(extraKey, currExtra);
-        totalItemsUSD += exPrice * itQty;
+        totalItemsUSD += exUSD * itQty;
       }
     }
 
-    const baseUnitPrice = Math.max(0, rawPrice - paidExtrasCost);
+    let itPriceUSD = Number(item.priceUSD);
+    if (isNaN(itPriceUSD) || itPriceUSD === 0) {
+      itPriceUSD = rawPrice >= 100 ? (ordCopRate > 0 ? rawPrice / ordCopRate : 0) : rawPrice;
+    }
+
+    const baseUnitPrice = Math.max(0, itPriceUSD - paidExtrasCostUSD);
     const itemTotalUSD = baseUnitPrice * itQty;
     totalItemsUSD += itemTotalUSD;
 
@@ -2193,7 +2287,7 @@ function buildCrispysCierreTicket(data) {
 
     const isDelivery = rawCat.includes('delivery') || nameLower.includes('delivery');
 
-    const isComida = rawCat.includes('burger') || rawCat.includes('hamburguesa') || rawCat.includes('comida') || rawCat.includes('plato') || rawCat.includes('entrada') || rawCat.includes('acompañante') || rawCat.includes('combo') || (!isDrink && !isDelivery && !rawCat.includes('adicional') && !rawCat.includes('extra') && !rawCat.includes('topping'));
+    const isComida = rawCat.includes('hot dog') || rawCat.includes('perro') || rawCat.includes('mugrosito') || rawCat.includes('burger') || rawCat.includes('hamburguesa') || rawCat.includes('comida') || rawCat.includes('plato') || rawCat.includes('entrada') || rawCat.includes('acompañante') || rawCat.includes('combo') || (!isDrink && !isDelivery && !rawCat.includes('adicional') && !rawCat.includes('extra') && !rawCat.includes('topping'));
 
     if (isDelivery) {
       const curr = deliverysGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0 };
@@ -2219,14 +2313,22 @@ function buildCrispysCierreTicket(data) {
   }
 
   for (const ord of (data.orders || [])) {
-    const fee = Number(ord.deliveryFeeUSD || ord.delivery_fee_usd || 0);
-    if (fee > 0 || ord.type === 'delivery') {
+    const ordCopRate = Number(ord.copRateAtPayment) || Number(data.exchangeRates?.COP) || copRateGlobal;
+    let feeUSD = Number(ord.deliveryFeeUSD || ord.delivery_fee_usd || 0);
+    const feeCOP = Number(ord.deliveryFeeCOP || ord.delivery_fee_cop || 0);
+    if (feeCOP > 0 && (feeUSD === 0 || feeUSD >= 100)) {
+      feeUSD = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
+    } else if (feeUSD >= 100) {
+      feeUSD = ordCopRate > 0 ? feeUSD / ordCopRate : 0;
+    }
+
+    if (feeUSD > 0 || feeCOP > 0 || ord.type === 'delivery') {
       const delName = 'DELIVERY';
       const curr = deliverysGroup.get(delName) || { name: delName, quantity: 0, totalUSD: 0 };
       curr.quantity += 1;
-      curr.totalUSD += fee;
+      curr.totalUSD += feeUSD;
       deliverysGroup.set(delName, curr);
-      totalItemsUSD += fee;
+      totalItemsUSD += feeUSD;
     }
   }
 
@@ -2287,11 +2389,15 @@ function buildCrispysCierreTicket(data) {
   // Pie de ticket
   lines.push('\x1Ba\x01');
   lines.push('TURNO CERRADO EXITOSAMENTE');
-  lines.push('CRISPY BURGER');
+  lines.push('MUGROSITO POS');
   lines.push('\x1Ba\x00');
   lines.push(PRINT_FORMAT_RESET, '\n\n\n\x1DV\x00');
 
   return Buffer.from(lines.join('\n'), 'ascii');
+}
+
+function buildMugrositoCierreTicket(data) {
+  return buildCrispysCierreTicket(data);
 }
 
 function buildCierreShiftTicket(data) {
@@ -2320,6 +2426,7 @@ module.exports = {
   buildReceiptTicket,
   buildReportTicket,
   buildCrispysCierreTicket,
+  buildMugrositoCierreTicket,
   buildCierreShiftTicket,
   loadDualPrinterConfig,
   saveDualPrinterConfig,
@@ -2330,4 +2437,6 @@ module.exports = {
   printReportTicket,
   printCierreShiftTicket,
   printTestTicket,
+  sendRawTicket,
+  sendRawTicketToTarget,
 };

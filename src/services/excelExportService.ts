@@ -12,8 +12,10 @@ export interface ReporteIntervaloData {
     paymentStatus: string;
     paymentMethod?: string;
     totalUSD: number;
+    totalCOP?: number;
     paidAmountUSD: number;
     deliveryFeeUSD?: number;
+    deliveryFeeCOP?: number;
     copRateAtPayment: number;
     bsRateAtPayment: number;
     createdAt: string;
@@ -100,8 +102,8 @@ function paymentCurrency(method: string): 'USD' | 'COP' | 'Bs' {
 export function exportToExcel(data: ReporteIntervaloData): void {
   const wb = XLSX.utils.book_new();
 
-  const copRateGlobal = Number(data.exchangeRates?.COP) || 3950;
-  const bsRateGlobal = Number(data.exchangeRates?.Bs) || 36.5;
+  const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+  const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
 
   // --- Hoja 1: Totales Consolidados con Venta Neta ---
   const billedTotals = { usd: 0, cop: 0, bs: 0 };
@@ -121,7 +123,7 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     if (tenderUSD === 0 && tenderCOP === 0 && tenderBs === 0 && paidUSD > 0) {
       if (curr === 'USD') tenderUSD = paidUSD;
       else if (curr === 'COP') tenderCOP = paidUSD * cRate;
-      else if (curr === 'Bs') tenderBs = paidUSD * bRate;
+      else if (curr === 'Bs') tenderBs = bRate > 0 ? (paidUSD * cRate) / bRate : 0;
     }
 
     const changeUSD = Number(payment.changeGivenUSD) || 0;
@@ -217,10 +219,10 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     });
   });
 
-  const totalFacturadoUSD = billedTotals.usd + (billedTotals.cop / copRateGlobal) + (billedTotals.bs / bsRateGlobal);
+  const totalFacturadoUSD = billedTotals.usd + (copRateGlobal > 0 ? billedTotals.cop / copRateGlobal : 0) + (bsRateGlobal > 0 && copRateGlobal > 0 ? (billedTotals.bs * bsRateGlobal) / copRateGlobal : 0);
 
   const totalesData = [
-    ['CIERRE DE CAJA EN EL INTERVALO CONSOLIDADO'],
+    ['MUGROSITO - CIERRE DE CAJA EN EL INTERVALO CONSOLIDADO'],
     ['Desde:', formatDate(data.dateRange.from), 'Hasta:', formatDate(data.dateRange.to)],
     [],
     ['Concepto', 'USD', 'COP', 'Bs'],
@@ -271,11 +273,30 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   XLSX.utils.book_append_sheet(wb, ws2, 'Cuentas');
 
   // --- Hoja 3: Ítems Vendidos (Estructurado en 4 Secciones) ---
-  const paidExtrasMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
+  const paidExtrasMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
   let freeToppingsCount = 0;
-  const foodMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
-  const drinkMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
-  const othersProductMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
+  const foodMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+  const drinkMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+  const othersProductMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+
+  const ordersById = new Map<string, any>((data.orders || []).map((o) => [o.id, o]));
+  const deliveryTiersMap: Record<number, { count: number; subtotalUSD: number; subtotalCOP: number }> = {};
+
+  billedOrders.forEach((ord) => {
+    const ordCopRate = Number(ord.copRateAtPayment) || copRateGlobal;
+    let feeUSD = Number(ord.deliveryFeeUSD) || 0;
+    let feeCOP = Number(ord.deliveryFeeCOP) || 0;
+    if (feeCOP === 0 && feeUSD > 0) feeCOP = Math.round(feeUSD * ordCopRate);
+    if (feeUSD === 0 && feeCOP > 0) feeUSD = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
+
+    if (ord.type === 'delivery' || feeUSD > 0 || feeCOP > 0) {
+      const tierKey = feeCOP > 0 ? feeCOP : Math.round(feeUSD * ordCopRate);
+      if (!deliveryTiersMap[tierKey]) deliveryTiersMap[tierKey] = { count: 0, subtotalUSD: 0, subtotalCOP: 0 };
+      deliveryTiersMap[tierKey].count += 1;
+      deliveryTiersMap[tierKey].subtotalUSD += feeUSD;
+      deliveryTiersMap[tierKey].subtotalCOP += feeCOP;
+    }
+  });
 
   cashItems.forEach((it: any) => {
     const itQty = Number(it.quantity) || 1;
@@ -310,6 +331,9 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     }
     const cleanName = rawName;
 
+    const parentOrder = ordersById.get(it.orderId);
+    const itemCopRate = Number(parentOrder?.copRateAtPayment) || Number(it.copRate) || copRateGlobal;
+
     const extrasList: any[] = [];
     if (Array.isArray(it.extras)) extrasList.push(...it.extras);
     else if (it.extrasJson && Array.isArray(it.extrasJson)) extrasList.push(...it.extrasJson);
@@ -320,17 +344,25 @@ export function exportToExcel(data: ReporteIntervaloData): void {
       } catch (e) {}
     }
 
-    let paidExtrasUnitCost = 0;
+    let paidExtrasUnitCostUSD = 0;
+    let paidExtrasUnitCostCOP = 0;
     extrasList.forEach((extra) => {
-      const price = Number(extra.price) || 0;
+      const exRawPrice = Number(extra.price) || 0;
       const exQty = Number(extra.quantity) || 1;
-      const rawName = (extra.name || 'Adicional').trim();
-      const cleanBaseName = rawName.replace(/^\d+x\s*/i, '').trim();
-      if (price > 0) {
-        paidExtrasUnitCost += price;
-        const current = paidExtrasMap.get(cleanBaseName) || { name: `ADD ${cleanBaseName}`, quantity: 0, subtotalUSD: 0 };
+      const extraName = (extra.name || 'Adicional').trim();
+      const cleanBaseName = extraName.replace(/^\d+x\s*/i, '').trim();
+      if (exRawPrice > 0) {
+        const exIsCOP = exRawPrice >= 100;
+        const exCOP = exIsCOP ? exRawPrice : Math.round(exRawPrice * itemCopRate);
+        const exUSD = exIsCOP ? (itemCopRate > 0 ? exRawPrice / itemCopRate : 0) : exRawPrice;
+
+        paidExtrasUnitCostUSD += exUSD;
+        paidExtrasUnitCostCOP += exCOP;
+
+        const current = paidExtrasMap.get(cleanBaseName) || { name: `ADD ${cleanBaseName}`, quantity: 0, subtotalUSD: 0, subtotalCOP: 0 };
         current.quantity += itQty * exQty;
-        current.subtotalUSD += price * itQty;
+        current.subtotalUSD += exUSD * itQty;
+        current.subtotalCOP += exCOP * itQty;
         paidExtrasMap.set(cleanBaseName, current);
       } else {
         freeToppingsCount += itQty * exQty;
@@ -338,8 +370,14 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     });
 
     const rawPrice = Number(it.price) || 0;
-    const baseUnitPrice = Math.max(0, rawPrice - paidExtrasUnitCost);
-    const baseSubtotal = baseUnitPrice * itQty;
+    const isCOP = rawPrice >= 100;
+    const itemPriceCOP = isCOP ? rawPrice : Math.round(rawPrice * itemCopRate);
+    const itemPriceUSD = isCOP ? (itemCopRate > 0 ? rawPrice / itemCopRate : 0) : rawPrice;
+
+    const baseUnitPriceUSD = Math.max(0, itemPriceUSD - paidExtrasUnitCostUSD);
+    const baseUnitPriceCOP = Math.max(0, itemPriceCOP - paidExtrasUnitCostCOP);
+    const baseSubtotalUSD = baseUnitPriceUSD * itQty;
+    const baseSubtotalCOP = baseUnitPriceCOP * itQty;
 
     const isOther =
       catLower.includes('delivery') ||
@@ -349,16 +387,17 @@ export function exportToExcel(data: ReporteIntervaloData): void {
       rawName.toLowerCase().includes('servicio');
 
     const targetMap = isDrink ? drinkMap : isOther ? othersProductMap : foodMap;
-    const prev = targetMap.get(cleanName) || { name: cleanName, quantity: 0, subtotalUSD: 0 };
+    const prev = targetMap.get(cleanName) || { name: cleanName, quantity: 0, subtotalUSD: 0, subtotalCOP: 0 };
     prev.quantity += itQty;
-    prev.subtotalUSD += baseSubtotal;
+    prev.subtotalUSD += baseSubtotalUSD;
+    prev.subtotalCOP += baseSubtotalCOP;
     targetMap.set(cleanName, prev);
   });
 
   const comidasItems = Array.from(foodMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
   const bebidasItems = Array.from(drinkMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
 
-  const adicionalesItems: Array<{ name: string; quantity: number; subtotalUSD: number }> = [];
+  const adicionalesItems: Array<{ name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }> = [];
   const sortedExtras = Array.from(paidExtrasMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   sortedExtras.forEach((extra) => {
     if (extra.quantity > 0) {
@@ -366,6 +405,7 @@ export function exportToExcel(data: ReporteIntervaloData): void {
         name: extra.name,
         quantity: extra.quantity,
         subtotalUSD: extra.subtotalUSD,
+        subtotalCOP: extra.subtotalCOP,
       });
     }
   });
@@ -374,22 +414,24 @@ export function exportToExcel(data: ReporteIntervaloData): void {
       name: 'Toppings Gratis',
       quantity: freeToppingsCount,
       subtotalUSD: 0,
+      subtotalCOP: 0,
     });
   }
 
-  const otrosItems: Array<{ name: string; quantity: number; subtotalUSD: number }> = [];
-  const sortedDeliveryFees = Object.keys(deliveryMap).map(Number).sort((a, b) => a - b);
-  sortedDeliveryFees.forEach((fee) => {
-    const count = deliveryMap[fee] || 0;
-    if (fee > 0 && count > 0) {
+  const otrosItems: Array<{ name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }> = [];
+  const sortedDeliveryFees = Object.keys(deliveryTiersMap).map(Number).sort((a, b) => a - b);
+  sortedDeliveryFees.forEach((feeKey) => {
+    const tier = deliveryTiersMap[feeKey];
+    if (tier && tier.count > 0) {
       otrosItems.push({
-        name: `Delivery ($${fee.toFixed(2)})`,
-        quantity: count,
-        subtotalUSD: fee * count,
+        name: `Delivery ($${tier.subtotalUSD.toFixed(2)})`,
+        quantity: tier.count,
+        subtotalUSD: tier.subtotalUSD,
+        subtotalCOP: tier.subtotalCOP,
       });
     }
   });
-  Array.from(othersProductMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name)).forEach((p) => otrosItems.push(p));
+  Array.from(othersProductMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name)).forEach((p) => otrosItems.push({ ...p, subtotalCOP: p.subtotalCOP || 0 }));
 
   const comidasUSD = comidasItems.reduce((s, it) => s + it.subtotalUSD, 0);
   const bebidasUSD = bebidasItems.reduce((s, it) => s + it.subtotalUSD, 0);
@@ -397,48 +439,49 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   const otrosUSD = otrosItems.reduce((s, it) => s + it.subtotalUSD, 0);
 
   const totalItemsUSD = comidasUSD + bebidasUSD + adicionalesUSD + otrosUSD;
+  const totalItemsCOP = [...comidasItems, ...bebidasItems, ...adicionalesItems, ...otrosItems].reduce((s, it) => s + (it.subtotalCOP || 0), 0);
 
-  const itemsHeader = ['Ítem / Concepto', 'Cantidad', 'Total USD'];
+  const itemsHeader = ['Ítem / Concepto', 'Cantidad', 'Total USD', 'Total COP'];
   const itemsRows: string[][] = [];
 
   // 1. COMIDAS
-  itemsRows.push(['--- 1. COMIDAS (Hamburguesas, Raciones) ---', '', '']);
+  itemsRows.push(['--- 1. COMIDAS (Hot Dogs, Raciones) ---', '', '', '']);
   if (comidasItems.length === 0) {
-    itemsRows.push(['Sin comidas facturadas', '0', '0.00']);
+    itemsRows.push(['Sin comidas facturadas', '0', '0.00', '0']);
   } else {
-    comidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2)]));
+    comidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
   }
   itemsRows.push([]);
 
   // 2. BEBIDAS
-  itemsRows.push(['--- 2. BEBIDAS (Refrescos, Jugos, Aguas) ---', '', '']);
+  itemsRows.push(['--- 2. BEBIDAS (Refrescos, Jugos, Aguas) ---', '', '', '']);
   if (bebidasItems.length === 0) {
-    itemsRows.push(['Sin bebidas facturadas', '0', '0.00']);
+    itemsRows.push(['Sin bebidas facturadas', '0', '0.00', '0']);
   } else {
-    bebidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2)]));
+    bebidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
   }
   itemsRows.push([]);
 
   // 3. ADICIONALES
-  itemsRows.push(['--- 3. ADICIONALES (Pagos y Toppings Gratis) ---', '', '']);
+  itemsRows.push(['--- 3. ADICIONALES (Pagos y Toppings Gratis) ---', '', '', '']);
   if (adicionalesItems.length === 0) {
-    itemsRows.push(['Sin adicionales facturados', '0', '0.00']);
+    itemsRows.push(['Sin adicionales facturados', '0', '0.00', '0']);
   } else {
-    adicionalesItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2)]));
+    adicionalesItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
   }
   itemsRows.push([]);
 
   // 4. OTROS
-  itemsRows.push(['--- 4. OTROS (Servicios de Delivery y Otros) ---', '', '']);
+  itemsRows.push(['--- 4. OTROS (Servicios de Delivery y Otros) ---', '', '', '']);
   if (otrosItems.length === 0) {
-    itemsRows.push(['Sin otros conceptos', '0', '0.00']);
+    itemsRows.push(['Sin otros conceptos', '0', '0.00', '0']);
   } else {
-    otrosItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2)]));
+    otrosItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
   }
   itemsRows.push([]);
 
   // TOTAL GENERAL
-  itemsRows.push(['TOTAL GENERAL FACTURADO EN ÍTEMS', '', `$${totalItemsUSD.toFixed(2)} USD`]);
+  itemsRows.push(['TOTAL GENERAL FACTURADO EN ÍTEMS', '', `$${totalItemsUSD.toFixed(2)} USD`, `${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP`]);
 
   const itemsData = [
     ['ÍTEMS FACTURADOS EN EL INTERVALO (CONTADO)'],
@@ -468,7 +511,7 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   ]);
 
   const historialData = [
-    ['HISTORIAL DE PAGOS POR COMANDA Y MÉTODO'],
+    ['MUGROSITO - HISTORIAL DE PAGOS POR COMANDA Y MÉTODO'],
     ['Desde:', formatDate(data.dateRange.from), 'Hasta:', formatDate(data.dateRange.to)],
     [],
     historialHeader,
@@ -485,19 +528,23 @@ export function exportToExcel(data: ReporteIntervaloData): void {
       .filter((it) => it.orderId === ord.id)
       .map((it) => `${it.quantity}x ${it.productName}`)
       .join(', ');
+    const cRate = ord.copRateAtPayment || data.exchangeRates.COP || 3100;
+    const bRate = ord.bsRateAtPayment || data.exchangeRates.Bs || 3.2;
+    const ordCop = (ord as any).totalCOP || (ord.totalUSD * cRate);
+    const ordBs = bRate > 0 ? (ordCop / bRate) : 0;
     return [
       formatDate(ord.createdAt),
       `#${ord.orderNumber}`,
       ord.customerName || 'Cliente Deudor',
       orderItems || 'Consumo general',
       ord.totalUSD.toFixed(2),
-      roundCOP(ord.totalUSD * (ord.copRateAtPayment || data.exchangeRates.COP)).toLocaleString(),
-      (ord.totalUSD * (ord.bsRateAtPayment || data.exchangeRates.Bs)).toFixed(2),
+      roundCOP(ordCop).toLocaleString(),
+      ordBs.toFixed(2),
     ];
   });
 
   const creditData = [
-    ['DESGLOSE DE CRÉDITOS Y CUENTAS POR COBRAR'],
+    ['MUGROSITO - DESGLOSE DE CRÉDITOS Y CUENTAS POR COBRAR'],
     ['Desde:', formatDate(data.dateRange.from), 'Hasta:', formatDate(data.dateRange.to)],
     [],
     ['Fecha / Hora', 'Comanda #', 'Cliente / Deudor', 'Ítems Solicitados', 'Deuda USD', 'Equivalente COP', 'Equivalente Bs'],
@@ -510,6 +557,6 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   // Generar y descargar
   const fromFormatted = new Date(data.dateRange.from).toISOString().slice(0, 10);
   const toFormatted = new Date(data.dateRange.to).toISOString().slice(0, 10);
-  const fileName = `Basilico_Reporte_${fromFormatted}_a_${toFormatted}.xlsx`;
+  const fileName = `Mugrosito_Reporte_${fromFormatted}_a_${toFormatted}.xlsx`;
   XLSX.writeFile(wb, fileName);
 }

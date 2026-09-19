@@ -1,10 +1,10 @@
-﻿const { spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-console.log('🍔 ==========================================');
-console.log('🍔 COMPILADOR AUTOMATICO APK - CRISPY BURGER');
-console.log('🍔 ==========================================\n');
+console.log('🌭 ==========================================');
+console.log('🌭 COMPILADOR AUTOMATICO APK - MUGROSITO');
+console.log('🌭 ==========================================\n');
 
 const projectRoot = path.resolve(__dirname, '..');
 const androidDir = path.join(projectRoot, 'android');
@@ -33,7 +33,8 @@ if (build.status !== 0) {
 
 const srcApk = path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
 const exportDir = path.join(projectRoot, 'export');
-const destApk = path.join(exportDir, 'CrispyBurger_Mesero.apk');
+const destApk = path.join(exportDir, 'Mugrosito_Mesero.apk');
+const fallbackApk = path.join(exportDir, 'CrispyBurger_Mesero.apk');
 
 if (!fs.existsSync(exportDir)) {
   fs.mkdirSync(exportDir, { recursive: true });
@@ -41,6 +42,7 @@ if (!fs.existsSync(exportDir)) {
 
 if (fs.existsSync(srcApk)) {
   fs.copyFileSync(srcApk, destApk);
+  fs.copyFileSync(srcApk, fallbackApk);
   const stats = fs.statSync(destApk);
   const sizeMb = (stats.size / (1024 * 1024)).toFixed(1);
   console.log('\n✅ ========================================================');

@@ -2,10 +2,10 @@
   "users": [
     {
       "id": "u-admin",
-      "username": "carlos",
-      "password": "carloscrispys",
+      "username": "linda",
+      "password": "lindamugrosito",
       "role": "admin",
-      "name": "Carlos"
+      "name": "Linda"
     },
     {
       "id": "u-mesero",
@@ -16,14 +16,14 @@
     },
     {
       "id": "u-caja",
-      "username": "cajeroa",
+      "username": "cajero",
       "password": "cajero",
       "role": "caja",
-      "name": "Cajero Principal"
+      "name": "Cajero"
     },
     {
       "id": "u-cocina",
-      "username": "basilico_cocina",
+      "username": "cocina",
       "password": "cocina",
       "role": "cocina",
       "name": "Jefe de Cocina"

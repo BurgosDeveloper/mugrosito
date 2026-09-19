@@ -13,6 +13,7 @@ const { postCompletedOrderCashMovements } = require('../helpers/cashLedger');
 const { assertShiftAccess } = require('../helpers/shiftScope');
 const { getRatesForShift } = require('../helpers/exchangeRates');
 const { requireRole } = require('../helpers/sessionAuth');
+const { roundCOPPayment } = require('../helpers/currencyRounding');
 
 function assertPaymentOrderAccess(user, order) {
   if (!order) {
@@ -68,6 +69,13 @@ module.exports = function(io) {
         client = null;
         return res.status(409).json({ error: 'Esta comanda ya tiene pagos por persona. Registra los movimientos restantes desde Pagar por personas.' });
       }
+      const hasGeneralPayments = paymentRows.some((payment) => (!Array.isArray(payment.item_ids) || payment.item_ids.length === 0) && (Number(payment.amount_paid_usd) > 0 || Number(payment.cash_tendered_cop) > 0 || Number(payment.cash_tendered_usd) > 0 || Number(payment.cash_tendered_bs) > 0));
+      if (hasGeneralPayments && normalizedItemIds.length > 0) {
+        await client.query('ROLLBACK');
+        client.release();
+        client = null;
+        return res.status(409).json({ error: 'Esta comanda ya tiene abonos generales registrados. Debes continuar el cobro desde la opción de Cobro General.' });
+      }
       const totals = paymentHistoryTotals(paymentRows);
       const orderTotal = Number(order.total_usd) || 0;
       let pendingChangeUSD = Math.max(0, totals.tenderedUSD - orderTotal - totals.changeGivenUSD);
@@ -92,10 +100,11 @@ module.exports = function(io) {
           client = null;
           return res.status(400).json({ error: 'Uno o más ítems no pertenecen a esta comanda.' });
         }
-        selectedTotalUSD = selectedItems.reduce(
+        const selectedTotalCOP = selectedItems.reduce(
           (total, item) => total + (Number(item.price) || 0) * (Number(item.quantity) || 0),
           0
         );
+        selectedTotalUSD = copRate > 0 ? Number((selectedTotalCOP / copRate).toFixed(4)) : selectedTotalCOP;
         if (entryType === 'payment' && selectedItems.some((item) => item.is_paid_individually)) {
           await client.query('ROLLBACK');
           client.release();
@@ -127,7 +136,7 @@ module.exports = function(io) {
         // El monto imputado al pago (principal) es el mínimo entre lo entregado (amountUSD) y la deuda pendiente.
         // En COP, si el cliente paga el monto comercial redondeado, cubre la totalidad de la deuda.
         if (currency === 'COP') {
-          const requiredCOP = Math.ceil((scopePendingDebtUSD * copRate) / 1000) * 1000;
+          const requiredCOP = roundCOPPayment(scopePendingDebtUSD * copRate);
           if (localAmount >= requiredCOP) {
             amountPaidUSD = scopePendingDebtUSD;
           } else {
@@ -220,7 +229,7 @@ module.exports = function(io) {
       const pendingDebtUSD = Math.max(0, totalUSD - totals.paidUSD);
       const pendingChangeUSD = Math.max(0, totals.tenderedUSD - totalUSD - totals.changeGivenUSD);
       const hasCopPayment = paymentRows.some((p) => Number(p.cash_tendered_cop) > 0 || Number(p.change_given_cop) > 0);
-      const copRateFinalize = Number(order.cop_rate_at_payment) || 3950;
+      const copRateFinalize = Number(order.cop_rate_at_payment) || 3100;
       const copToleranceUSD = (hasCopPayment && copRateFinalize > 0) ? (1000 / copRateFinalize) : 0.05;
       const maxChangeToleranceUSD = Math.max(0.05, copToleranceUSD);
 

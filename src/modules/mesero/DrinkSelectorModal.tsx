@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Product, OrderItem } from '../../data/mockData';
-import { roundCOP } from '../../utils/currencyRounding';
 import {
   IoClose,
   IoAdd,
@@ -51,7 +50,7 @@ export const DrinkSelectorModal: React.FC<DrinkSelectorModalProps> = ({
   onConfirm,
   defaultTakeaway = false,
   defaultDelivery = false,
-  exchangeRates = { COP: 3950, Bs: 36.5 },
+  exchangeRates = { COP: 3100, Bs: 3.2 },
   inline = false,
   initialEditItem = null,
 }) => {
@@ -160,9 +159,13 @@ export const DrinkSelectorModal: React.FC<DrinkSelectorModalProps> = ({
     setTimeout(() => setCopyToast(''), 2000);
   };
 
-  const copRate = exchangeRates?.COP || 3950;
-  const bsRate = exchangeRates?.Bs || 36.5;
+  const copRate = exchangeRates?.COP || 3100;
+  const bsRate = exchangeRates?.Bs || 3.2;
   const totalPrice = drink.price * units.length;
+  const priceUSD = copRate > 0 ? drink.price / copRate : 0;
+  const priceBs = bsRate > 0 ? drink.price / bsRate : 0;
+  const totalUSD = copRate > 0 ? totalPrice / copRate : 0;
+  const totalBs = bsRate > 0 ? totalPrice / bsRate : 0;
   const isFlavorRequired = Boolean(drink.flavors && drink.flavors.length > 0);
   const isAddDisabled = isFlavorRequired && units.some((u) => !u.flavor);
 
@@ -210,7 +213,7 @@ export const DrinkSelectorModal: React.FC<DrinkSelectorModalProps> = ({
                 <span>{drink.name.toUpperCase()}</span>
               </h2>
               <span className="bg-yellow-400 text-black text-xs px-2.5 py-0.5 rounded-xl font-black shadow-xs border border-yellow-500">
-                ${drink.price.toFixed(2)} USD
+                {Math.round(drink.price).toLocaleString('es-CO')} COP
               </span>
               {units.length > 1 && (
                 <span className="bg-stone-900 text-white text-xs px-2 py-0.5 rounded-xl font-black">
@@ -219,9 +222,9 @@ export const DrinkSelectorModal: React.FC<DrinkSelectorModalProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5 text-xs font-bold text-gray-700 flex-wrap">
-              <span>🇨🇴 {roundCOP(drink.price * copRate).toLocaleString()} COP</span>
+              <span>🇺🇸 ${priceUSD.toFixed(2)} USD</span>
               <span className="text-gray-400">•</span>
-              <span>🇻🇪 {(drink.price * bsRate).toFixed(2)} Bs</span>
+              <span>🇻🇪 {priceBs.toFixed(2)} Bs</span>
             </div>
           </div>
         </div>
@@ -477,13 +480,13 @@ export const DrinkSelectorModal: React.FC<DrinkSelectorModalProps> = ({
           </span>
           <div className="flex items-baseline gap-2.5 flex-wrap">
             <span className={`${inline ? 'text-xl sm:text-2xl' : 'text-xl'} font-black text-black`}>
-              ${totalPrice.toFixed(2)} <span className="text-xs sm:text-sm font-bold text-gray-500">USD</span>
+              {Math.round(totalPrice).toLocaleString('es-CO')} <span className="text-xs sm:text-sm font-bold text-gray-500">COP</span>
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇨🇴 {roundCOP(totalPrice * copRate).toLocaleString()} COP
+              🇺🇸 ${totalUSD.toFixed(2)} USD
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇻🇪 {(totalPrice * bsRate).toFixed(2)} Bs
+              🇻🇪 {totalBs.toFixed(2)} Bs
             </span>
           </div>
         </div>

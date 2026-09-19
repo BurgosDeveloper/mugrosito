@@ -7,7 +7,7 @@ export interface RecipeIngredient {
 export interface Product {
   id: string;
   name: string;
-  category: 'Hamburguesas' | 'Bebidas' | 'Acompañantes' | 'Combos' | 'Pizzas' | 'Platos' | string;
+  category: 'Hot Dogs' | 'Hamburguesas' | 'Bebidas' | 'Acompañantes' | 'Combos' | 'Pizzas' | 'Platos' | string;
   drinkType?: 'refresco' | 'jugo' | 'licor' | 'granizado' | 'te' | 'agua' | string;
   price: number; // En USD
   priceSmall?: number; // En USD (retrocompatibilidad)
@@ -140,6 +140,7 @@ export interface Order {
   paymentStatus: PaymentStatus;
   items: OrderItem[];
   totalUSD: number;
+  totalCOP?: number;
   paidAmountUSD?: number;
   mergedFromOrders?: string[];
   paymentHistory?: OrderPaymentBreakdown[];
@@ -156,6 +157,7 @@ export interface Order {
   kitchenNotes?: string;
   shift?: 'manana' | 'noche' | 'ambos';
   deliveryFeeUSD?: number;
+  deliveryFeeCOP?: number;
 }
 
 
@@ -236,8 +238,8 @@ export interface BurgerUnitConfig {
 }
 
 export const INITIAL_EXCHANGE_RATES: ExchangeRates = {
-  COP: 3950,
-  Bs: 36.50,
+  COP: 3100,
+  Bs: 3.20,
 };
 
 // Arrays de respaldo para producción limpia

@@ -167,7 +167,7 @@ module.exports = function(io) {
                 END) as total_cop,
                 SUM(CASE 
                   WHEN op.payment_method IN ('Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito') 
-                  THEN COALESCE(NULLIF(op.cash_tendered_bs, 0), op.amount_paid_usd * op.bs_rate) - COALESCE(op.change_given_bs, 0)
+                  THEN COALESCE(NULLIF(op.cash_tendered_bs, 0), (op.amount_paid_usd * op.cop_rate) / NULLIF(op.bs_rate, 0)) - COALESCE(op.change_given_bs, 0)
                   ELSE 0 
                 END) as total_bs,
                 COUNT(op.id) as count
@@ -277,8 +277,8 @@ module.exports = function(io) {
             changeGivenUSD: parseFloat(pm.change_given_usd) || 0,
             changeGivenCOP: parseFloat(pm.change_given_cop) || 0,
             changeGivenBs: parseFloat(pm.change_given_bs) || 0,
-            copRate: parseFloat(pm.cop_rate) || 3950,
-            bsRate: parseFloat(pm.bs_rate) || 36.5,
+            copRate: parseFloat(pm.cop_rate) || 3100,
+            bsRate: parseFloat(pm.bs_rate) || 3.2,
             createdAt: pm.created_at,
           }));
         }
@@ -298,8 +298,8 @@ module.exports = function(io) {
 
         const { rows: rateRows } = await query(`SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = 'ambos'`);
         const currentRates = {
-          COP: Number(rateRows[0]?.cop_rate) || 3950,
-          Bs: Number(rateRows[0]?.bs_rate) || 36.5,
+          COP: Number(rateRows[0]?.cop_rate) || 3100,
+          Bs: Number(rateRows[0]?.bs_rate) || 3.2,
         };
 
         await printCierreShiftTicket({
@@ -345,12 +345,27 @@ module.exports = function(io) {
         console.warn(`⚠️ Aviso: no se pudo imprimir ticket de cierre térmico:`, printErr.message);
       }
 
-      // 5. Archivado de turno: Archivar TODAS las comandas del turno (pagadas, a crédito, canceladas; data 100% persistente en BD)
-      const allShiftOrderIds = shiftOrdersRows.map((o) => o.id);
+      // 5. Archivado de turno: Archivar comandas pagadas y canceladas. Preservar cuentas a crédito activas (según GUIA.md)
+      const completedOrCancelledIds = shiftOrdersRows
+        .filter((o) => o.payment_status !== 'credito')
+        .map((o) => o.id);
 
-      if (allShiftOrderIds.length > 0) {
-        await query('UPDATE orders SET archived_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]) AND archived_at IS NULL', [allShiftOrderIds]);
-        console.log(`📦 [ARCHIVADO DE TURNO] Se archivaron ${allShiftOrderIds.length} comandas del turno (incluyendo pagos y créditos; data 100% preservada en BD).`);
+      if (completedOrCancelledIds.length > 0) {
+        await query('UPDATE orders SET archived_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]) AND archived_at IS NULL', [completedOrCancelledIds]);
+        console.log(`📦 [ARCHIVADO DE TURNO] Se archivaron ${completedOrCancelledIds.length} comandas pagadas/canceladas (data histórica 100% preservada en BD).`);
+      }
+
+      // 6. Preservación y Renumeración Consecutiva de Créditos Activos (#1, #2, ...)
+      const activeCredits = shiftOrdersRows
+        .filter((o) => o.payment_status === 'credito')
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+      for (let i = 0; i < activeCredits.length; i++) {
+        const newOrderNum = `#${i + 1}`;
+        await query('UPDATE orders SET order_number = $1 WHERE id = $2', [newOrderNum, activeCredits[i].id]);
+      }
+      if (activeCredits.length > 0) {
+        console.log(`📝 [PRESERVACIÓN DE CRÉDITOS] Se preservaron y renumeraron ${activeCredits.length} comandas a crédito activas.`);
       }
 
       // 7. Marcar movimientos de caja chica con el cierreId (preservados en BD) y reiniciar apertura
@@ -384,8 +399,8 @@ module.exports = function(io) {
           differenceUSD: diffUSD,
           differenceCOP: diffCOP,
           totalSalesUSD,
-          purgedOrdersCount: allShiftOrderIds.length,
-          archivedCreditsCount: shiftOrdersRows.filter((o) => o.payment_status === 'credito').length,
+          purgedOrdersCount: completedOrCancelledIds.length,
+          preservedCreditsCount: activeCredits.length,
         },
       });
     } catch (err) {
@@ -430,9 +445,9 @@ module.exports = function(io) {
       const orders = await fetchAllOrders();
       const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado');
 
-      let reply = 'Consulta procesada en Crispy.';
+      let reply = 'Consulta procesada en Mugrosito.';
 
-      if (lower.includes('hamburguesa') || lower.includes('burger') || lower.includes('vendida') || lower.includes('top')) {
+      if (lower.includes('hot dog') || lower.includes('perro') || lower.includes('mugrosito') || lower.includes('hamburguesa') || lower.includes('burger') || lower.includes('vendida') || lower.includes('top')) {
         const tally = {};
         paidOrders.forEach((o) => {
           o.items.forEach((it) => {
@@ -441,9 +456,9 @@ module.exports = function(io) {
         });
         const entries = Object.entries(tally).sort((a, b) => b[1] - a[1]);
         if (entries.length === 0) {
-          reply = '🍔 No hay registros de hamburguesas vendidas cobradas el día de hoy.';
+          reply = '🌭 No hay registros de hot dogs vendidos cobrados el día de hoy.';
         } else {
-          reply = `🍔 Hamburguesas & Ítems Cobrados Hoy:\n` + entries.map(([name, qty]) => `• ${name}: ${qty} unidades`).join('\n');
+          reply = `🌭 Hot Dogs & Ítems Cobrados Hoy:\n` + entries.map(([name, qty]) => `• ${name}: ${qty} unidades`).join('\n');
         }
       } else if (lower.includes('bebida') || lower.includes('refresco') || lower.includes('tomar')) {
         let drinkQty = 0;

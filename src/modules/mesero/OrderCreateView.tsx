@@ -51,7 +51,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
   const [cartItems, setCartItems] = useState<OrderItem[]>([]);
   const [customerName, setCustomerName] = useState<string>('');
   const [kitchenNotes, setKitchenNotes] = useState<string>('');
-  const [deliveryFeeUSD, setDeliveryFeeUSD] = useState<number>(target.type === 'delivery' ? 1.0 : 0);
+  const [deliveryFeeUSD, setDeliveryFeeUSD] = useState<number>(target.type === 'delivery' ? 2000 : 0);
   const [showDeliveryConfig, setShowDeliveryConfig] = useState<boolean>(target.type === 'delivery');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState<boolean>(false);
   const [orderError, setOrderError] = useState<string | null>(null);
@@ -83,7 +83,11 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
 
   const availableFreeToppings = useMemo(() => {
     return activeIngredients.filter(
-      (i) => i.ingredientType === 'gratis' || i.category === 'Gratis'
+      (i) =>
+        (i.ingredientType?.toLowerCase() === 'gratis' ||
+          i.category?.toLowerCase() === 'gratis' ||
+          i.category?.toLowerCase() === 'toppings gratis') &&
+        i.available !== false
     );
   }, [activeIngredients]);
 
@@ -198,7 +202,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
       id: item.productId,
       name: item.productName,
       price: estimatedBasePrice,
-      category: item.category || (isDrink ? 'Bebidas' : 'Hamburguesas'),
+      category: item.category || (isDrink ? 'Bebidas' : 'Hot Dogs'),
       baseIngredients: [],
     } as Product;
 
@@ -212,7 +216,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
     }
   };
 
-  // Confirmar Hamburguesa personalizada (nueva o editada)
+  // Confirmar Hot Dog personalizado (nuevo o editado)
   const handleConfirmBurgerAdd = (
     configOrList: BurgerOrderConfirmationItem | BurgerOrderConfirmationItem[]
   ) => {
@@ -223,7 +227,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
       productName: config.burger.name,
       price: config.finalPrice,
       quantity: config.quantity,
-      category: config.burger.category || 'Hamburguesas',
+      category: config.burger.category || 'Hot Dogs',
       proteins: config.proteins && config.proteins.length > 0 ? config.proteins : undefined,
       removedIngredients: config.removedIngredients && config.removedIngredients.length > 0 ? config.removedIngredients : undefined,
       extras: config.extras && config.extras.length > 0 ? config.extras : undefined,
@@ -331,8 +335,8 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
   const hasAnyDeliveryItem = cartItems.some((i) => i.isDelivery);
   const isDeliveryOrder = target.type === 'delivery' || hasAnyDeliveryItem;
   const effectiveDeliveryFee = (hasAnyDeliveryItem || target.type === 'delivery') ? deliveryFeeUSD : 0;
-  const itemsSubtotalUSD = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const cartTotalUSD = itemsSubtotalUSD + effectiveDeliveryFee;
+  const itemsSubtotalCOP = cartItems.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
+  const cartTotalCOP = itemsSubtotalCOP + effectiveDeliveryFee;
 
   const setItemPackaging = (itemId: string, mode: 'salon' | 'llevar' | 'delivery') => {
     setCartItems((prev) => {
@@ -347,7 +351,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
 
       const stillHasDelivery = next.some((i) => i.isDelivery);
       if (mode === 'delivery') {
-        if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+        if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
         setShowDeliveryConfig(true);
       } else if (!stillHasDelivery && target.type !== 'delivery') {
         setDeliveryFeeUSD(0);
@@ -367,7 +371,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
       }))
     );
     if (isDelivery) {
-      if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+      if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
       setShowDeliveryConfig(true);
     } else {
       if (target.type !== 'delivery') {
@@ -392,7 +396,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
         return;
       }
       if (effectiveDeliveryFee <= 0) {
-        setOrderError('⚠️ Debe seleccionar o ingresar el costo del Delivery (mínimo $0.50).');
+        setOrderError('⚠️ Debe seleccionar o ingresar el costo del Delivery (mínimo 1.000 COP).');
         setShowDeliveryConfig(true);
         return;
       }
@@ -407,14 +411,20 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
     setIsSubmittingOrder(true);
 
     try {
+      const copRate = exchangeRates?.COP || 3100;
+      const totalUSDCalc = copRate > 0 ? (cartTotalCOP / copRate) : 0;
+      const deliveryUSDCalc = copRate > 0 ? (effectiveDeliveryFee / copRate) : 0;
+
       await createOrder({
         type: target.type,
         tableNumber: target.tableNumber,
         customerName: customerName.trim() || undefined,
         kitchenNotes: getCleanItemNote(kitchenNotes) || undefined,
         items: cartItems,
-        totalUSD: cartTotalUSD,
-        deliveryFeeUSD: effectiveDeliveryFee,
+        totalUSD: totalUSDCalc,
+        totalCOP: cartTotalCOP,
+        deliveryFeeUSD: deliveryUSDCalc,
+        deliveryFeeCOP: effectiveDeliveryFee,
         shift: userSession?.shift || 'ambos',
         targetPrinter,
       } as any);
@@ -685,7 +695,7 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
                             type="button"
                             onClick={() => {
                               setItemPackaging(item.id, 'delivery');
-                              if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+                              if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
                             }}
                             className={`px-2 py-0.5 rounded-md text-[10px] font-black border transition-all cursor-pointer ${
                               item.isDelivery
@@ -707,14 +717,14 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
                             </span>
                           ) : (
                             <span className="text-[10px] font-bold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded-md inline-block">
-                              🍔 Entera
+                              🌭 Entero
                             </span>
                           )}
                         </div>
                       </div>
 
                       <span className="text-sm sm:text-base font-black text-black shrink-0">
-                        ${(item.price * item.quantity).toFixed(2)}
+                        {Math.round(item.price * item.quantity).toLocaleString('es-CO')} COP
                       </span>
                     </div>
 
@@ -811,13 +821,13 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
             <div className="bg-white p-3 rounded-2xl border border-gray-200 space-y-1 shadow-xs">
               <div className="flex justify-between text-xs sm:text-sm font-bold text-gray-600">
                 <span>Subtotal Ítems:</span>
-                <span className="text-black font-black">${itemsSubtotalUSD.toFixed(2)} USD</span>
+                <span className="text-black font-black">{Math.round(itemsSubtotalCOP).toLocaleString('es-CO')} COP</span>
               </div>
 
               {isDeliveryOrder && (
                 <div className="flex justify-between text-xs sm:text-sm font-bold text-gray-600">
                   <span>Costo Delivery:</span>
-                  <span className="text-black font-black">+${deliveryFeeUSD.toFixed(2)} USD</span>
+                  <span className="text-black font-black">+{Math.round(effectiveDeliveryFee).toLocaleString('es-CO')} COP</span>
                 </div>
               )}
 
@@ -825,10 +835,10 @@ export const OrderCreateView: React.FC<OrderCreateViewProps> = ({
                 <span className="text-xs sm:text-sm font-black text-gray-900 uppercase">Total a Pagar:</span>
                 <div className="text-right">
                   <span className="text-xl sm:text-2xl font-black text-black block leading-none">
-                    ${cartTotalUSD.toFixed(2)} USD
+                    {Math.round(cartTotalCOP).toLocaleString('es-CO')} <span className="text-xs font-bold text-gray-500">COP</span>
                   </span>
                   <span className="text-xs text-gray-600 font-bold block mt-1">
-                    ≈ ${(cartTotalUSD * exchangeRates.COP).toLocaleString()} COP | {(cartTotalUSD * exchangeRates.Bs).toFixed(2)} Bs
+                    🇺🇸 ${(exchangeRates.COP > 0 ? cartTotalCOP / exchangeRates.COP : 0).toFixed(2)} USD | 🇻🇪 {(exchangeRates.Bs > 0 ? cartTotalCOP / exchangeRates.Bs : 0).toFixed(2)} Bs
                   </span>
                 </div>
               </div>

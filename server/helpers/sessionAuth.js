@@ -88,7 +88,7 @@ function extractToken(req) {
   if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
     return authHeader.substring(7).trim();
   }
-  return req.get('x-crispy-token') || req.get('x-basilico-session') || null;
+  return req.get('x-mugrosito-token') || req.get('x-crispy-token') || req.get('x-basilico-session') || null;
 }
 
 function requireSession(req, res, next) {

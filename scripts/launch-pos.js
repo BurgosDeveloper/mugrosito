@@ -14,7 +14,7 @@ function killOldPosInstances() {
     const outNode = execSync(cmdNode, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     const nodeLines = outNode.split('\n');
     for (const line of nodeLines) {
-      if (line.toLowerCase().includes('crispy') || line.toLowerCase().includes('basilico') || line.toLowerCase().includes('server/index.js')) {
+      if (line.toLowerCase().includes('mugrosito') || line.toLowerCase().includes('crispy') || line.toLowerCase().includes('basilico') || line.toLowerCase().includes('server/index.js')) {
         const match = line.trim().match(/(\d+)$/);
         if (match && Number(match[1]) !== process.pid) {
           try { execSync(`taskkill /F /PID ${match[1]}`, { stdio: 'ignore' }); } catch (e) {}
@@ -43,7 +43,7 @@ function killOldPosInstances() {
     const outTask = execSync(cmdTask, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     const taskLines = outTask.split('\n');
     for (const line of taskLines) {
-      if (/Crispy Burger POS|Basilico/i.test(line)) {
+      if (/Mugrosito|Crispy Burger POS|Basilico/i.test(line)) {
         const match = line.match(/"([^"]+)","(\d+)"/);
         if (match && match[2] && Number(match[2]) !== process.pid) {
           try { execSync(`taskkill /F /PID ${match[2]}`, { stdio: 'ignore' }); } catch (e) {}
@@ -67,7 +67,7 @@ function getConnectionInfo() {
         try {
           const connectionInfo = JSON.parse(body);
           if (!connectionInfo.backendUrl) throw new Error('No se detectó una IP LAN válida.');
-          if (connectionInfo.app !== 'crispy') throw new Error('El backend respondiendo no pertenece a Crispy Burger.');
+          if (connectionInfo.app !== 'mugrosito' && connectionInfo.app !== 'crispy') throw new Error('El backend respondiendo no pertenece a Mugrosito.');
           resolve(connectionInfo);
         } catch (error) {
           reject(error);
@@ -121,7 +121,7 @@ async function openPos(backendUrl) {
   }
 
   if (await tryOpenBrowser('cmd.exe', ['/c', 'start', '', backendUrl])) return;
-  throw new Error('No se encontró un navegador para abrir Crispy Burger.');
+  throw new Error('No se encontró un navegador para abrir Mugrosito.');
 }
 
 async function waitForBackend() {
@@ -133,7 +133,7 @@ async function waitForBackend() {
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
-  throw new Error('Crispy Burger no pudo iniciar el backend LAN. Revisa PostgreSQL y la conexión de red.');
+  throw new Error('Mugrosito no pudo iniciar el backend LAN. Revisa PostgreSQL y la conexión de red.');
 }
 
 async function launch() {
@@ -158,10 +158,10 @@ async function launch() {
 }
 
 launch().catch((error) => {
-  console.error('Error al iniciar Crispy Burger:', error.message);
+  console.error('Error al iniciar Mugrosito:', error.message);
   try {
     const safeMsg = String(error.message || 'Error desconocido').replace(/'/g, '').replace(/"/g, '');
-    execSync(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('${safeMsg}', 'Crispy Burger POS - Error de Inicio', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)"`, { stdio: 'ignore' });
+    execSync(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('${safeMsg}', 'Mugrosito POS - Error de Inicio', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)"`, { stdio: 'ignore' });
   } catch (e) {}
   process.exitCode = 1;
 });

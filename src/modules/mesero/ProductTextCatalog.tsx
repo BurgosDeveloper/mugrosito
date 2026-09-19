@@ -22,7 +22,7 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
   onSelectCategory,
   searchQuery,
   onSearchChange,
-  exchangeRates = { COP: 3950, Bs: 36.5 },
+  exchangeRates = { COP: 3100, Bs: 3.2 },
   salsas = [],
   onSelectSalsa,
 }) => {
@@ -83,7 +83,7 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Buscar hamburguesa, papas, bebida o ingrediente..."
+            placeholder="Buscar hot dog, papas, bebida o ingrediente..."
             className="w-full pl-9 pr-9 py-2 rounded-xl bg-gray-50 border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 font-bold"
           />
           {searchQuery && (
@@ -124,16 +124,16 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
           </div>
         ) : (
           <>
-            {/* SECCIÓN 1: COMIDAS (Hamburguesas, Platos, Acompañantes/Papas) - Color Rojo Crema Suave */}
+            {/* SECCIÓN 1: COMIDAS (Hot Dogs, Platos, Acompañantes/Papas) - Color Rojo Crema Suave */}
             {showFoods && foodProducts.length > 0 && (
               <div>
                 {/* Encabezado de Sección Comidas */}
                 <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-red-100/70 border border-red-200 text-red-950 mb-2 select-none">
                   <div className="flex items-center gap-2 font-black text-sm sm:text-base tracking-wide">
-                    <span className="text-lg">🍔</span>
-                    <span className="uppercase">Comidas y Platos</span>
+                    <span className="text-lg">🌭</span>
+                    <span className="uppercase">Comidas y Hot Dogs</span>
                     <span className="text-xs font-bold text-red-800/80 normal-case hidden sm:inline">
-                      (Hamburguesas personalizables y raciones)
+                      (Hot Dogs personalizables y raciones)
                     </span>
                   </div>
                   <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-red-200/90 text-red-950">
@@ -144,7 +144,8 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                 {/* Grilla de Tarjetas de Comidas con Textos Centrados */}
                 <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
                   {foodProducts.map((product) => {
-                    const priceUSD = product.price;
+                    const priceCOP = product.price;
+                    const equivUSD = exchangeRates.COP > 0 ? (priceCOP / exchangeRates.COP).toFixed(2) : '0.00';
                     const isCustom = isCustomizableProduct(product);
                     const isPotato = isPotatoProduct(product);
 
@@ -156,8 +157,8 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                         className="p-3 rounded-2xl bg-[#fff8f8] hover:bg-red-50 border-2 border-red-200/90 hover:border-red-400 text-center transition-all shadow-xs hover:shadow-md flex flex-col items-center justify-between gap-1.5 group active:scale-[0.98] cursor-pointer min-h-[108px]"
                         title={
                           isPotato
-                            ? `${product.name} - $${priceUSD.toFixed(2)} USD (Clic para agregar directo. Clics adicionales suman cantidad)`
-                            : `${product.name} - $${priceUSD.toFixed(2)} USD (Clic para personalizar ingredientes y adicionales)`
+                            ? `${product.name} - ${Math.round(priceCOP).toLocaleString('es-CO')} COP (~ $${equivUSD} USD)`
+                            : `${product.name} - ${Math.round(priceCOP).toLocaleString('es-CO')} COP (~ $${equivUSD} USD)`
                         }
                       >
                         <div className="flex flex-col items-center justify-center text-center w-full min-w-0">
@@ -168,8 +169,8 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                             {isPotato ? 'Directo (+1)' : isCustom ? 'Personalizable' : 'Comida'}
                           </span>
                         </div>
-                        <span className="font-black text-sm sm:text-base text-red-950 bg-red-100/90 group-hover:bg-red-200 px-3 py-1 rounded-xl border border-red-300 shrink-0 shadow-2xs text-center">
-                          ${priceUSD.toFixed(2)}
+                        <span className="font-black text-xs sm:text-sm text-red-950 bg-red-100/90 group-hover:bg-red-200 px-2.5 py-1 rounded-xl border border-red-300 shrink-0 shadow-2xs text-center">
+                          {Math.round(priceCOP).toLocaleString('es-CO')} COP
                         </span>
                       </button>
                     );
@@ -198,7 +199,8 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                 {/* Grilla de Tarjetas de Bebidas con Textos Centrados */}
                 <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
                   {drinkProducts.map((product) => {
-                    const priceUSD = product.price;
+                    const priceCOP = product.price;
+                    const equivUSD = exchangeRates.COP > 0 ? (priceCOP / exchangeRates.COP).toFixed(2) : '0.00';
 
                     return (
                       <button
@@ -206,7 +208,7 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                         type="button"
                         onClick={() => onSelectProduct(product)}
                         className="p-3 rounded-2xl bg-[#f0f7ff] hover:bg-sky-50 border-2 border-sky-200/90 hover:border-sky-400 text-center transition-all shadow-xs hover:shadow-md flex flex-col items-center justify-between gap-1.5 group active:scale-[0.98] cursor-pointer min-h-[108px]"
-                        title={`${product.name} - $${priceUSD.toFixed(2)} USD (Clic para agregar directo. Clics adicionales suman cantidad)`}
+                        title={`${product.name} - ${Math.round(priceCOP).toLocaleString('es-CO')} COP (~ $${equivUSD} USD)`}
                       >
                         <div className="flex flex-col items-center justify-center text-center w-full min-w-0">
                           <span className="font-black text-sm sm:text-base text-sky-950 group-hover:text-sky-900 leading-tight text-center line-clamp-2">
@@ -217,8 +219,8 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                             <span>Directo (+1)</span>
                           </span>
                         </div>
-                        <span className="font-black text-sm sm:text-base text-sky-950 bg-sky-100/90 group-hover:bg-sky-200 px-3 py-1 rounded-xl border border-sky-300 shrink-0 shadow-2xs text-center">
-                          ${priceUSD.toFixed(2)}
+                        <span className="font-black text-xs sm:text-sm text-sky-950 bg-sky-100/90 group-hover:bg-sky-200 px-2.5 py-1 rounded-xl border border-sky-300 shrink-0 shadow-2xs text-center">
+                          {Math.round(priceCOP).toLocaleString('es-CO')} COP
                         </span>
                       </button>
                     );
@@ -264,7 +266,7 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
                         </span>
                       </div>
                       <span className="font-black text-xs sm:text-sm text-amber-950 bg-amber-200/90 group-hover:bg-amber-300 px-3 py-1 rounded-xl border border-amber-300 shrink-0 shadow-2xs text-center uppercase tracking-wide">
-                        $0.00 (Gratis)
+                        0 COP (Gratis)
                       </span>
                     </button>
                   ))}
@@ -277,3 +279,4 @@ export const ProductTextCatalog: React.FC<ProductTextCatalogProps> = ({
     </div>
   );
 };
+

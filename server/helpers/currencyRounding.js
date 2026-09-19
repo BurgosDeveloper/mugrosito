@@ -1,11 +1,22 @@
-﻿/**
- * Redondeo Comercial Contable para Crispy Burger POS Backend (Tarea 13)
+/**
+ * Redondeo Comercial Contable para Mugrosito POS Backend (Tarea 13)
  */
 
-function roundCOP(amountCOP) {
-  const num = parseFloat(amountCOP);
+function roundCOPPayment(amountCOP) {
+  const num = Math.round(Number(amountCOP) * 100) / 100;
   if (!num || num <= 0 || isNaN(num)) return 0;
-  return Math.ceil(num / 1000) * 1000;
+  const thousands = Math.floor(num / 1000) * 1000;
+  const remainder = num - thousands;
+
+  // Tolerancia de 10 COP en los múltiplos de 1000 para absorber ruido de conversión a 2 decimales en USD (ej. 42005 -> 42000)
+  if (remainder <= 10) return thousands;
+  if (remainder >= 990) return thousands + 1000;
+  if (remainder <= 500) return thousands + 500;
+  return thousands + 1000;
+}
+
+function roundCOP(amountCOP) {
+  return roundCOPPayment(amountCOP);
 }
 
 function roundBs(amountBs) {
@@ -22,6 +33,7 @@ function roundUSD(amountUSD) {
 
 module.exports = {
   roundCOP,
+  roundCOPPayment,
   roundBs,
   roundUSD,
 };

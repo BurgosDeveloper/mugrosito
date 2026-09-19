@@ -51,15 +51,15 @@ export const LoginPage: React.FC = () => {
         {/* Header / Brand */}
         <div className="text-center space-y-3">
           <div className="w-20 h-20 mx-auto rounded-2xl bg-white border-2 border-yellow-400 p-1 flex items-center justify-center shadow-md transform hover:scale-105 transition-all overflow-hidden">
-            <img src="/logo_default.png" alt="Crispy Burger" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }} />
+            <img src="/logo_default.png" alt="Mugrosito" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }} />
           </div>
 
           <div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-100 border border-yellow-300 text-black text-[10px] font-black uppercase tracking-widest mb-2">
               <IoShieldCheckmarkOutline />
-              <span>SISTEMA DE CONTROL CRISPY</span>
+              <span>SISTEMA DE CONTROL MUGROSITO</span>
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-gray-900">CRISPY BURGER POS</h1>
+            <h1 className="text-2xl font-black tracking-tight text-gray-900">MUGROSITO POS</h1>
             <p className="text-xs text-gray-500 mt-1">Ingresa tus credenciales para acceder al sistema.</p>
           </div>
         </div>

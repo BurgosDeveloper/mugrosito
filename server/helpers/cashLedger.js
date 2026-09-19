@@ -15,9 +15,11 @@ function paymentMovementAmounts(payment) {
   // Compatibilidad con movimientos antiguos que no guardaron el efectivo recibido.
   if (incomeUSD === 0 && incomeCOP === 0 && incomeBs === 0 && amountPaidUSD > 0) {
     const currency = paymentCurrency(payment.payment_method);
+    const copR = Number(payment.cop_rate) || 3100;
+    const bsR = Number(payment.bs_rate) || 3.2;
     if (currency === 'USD') incomeUSD = amountPaidUSD;
-    if (currency === 'COP') incomeCOP = amountPaidUSD * (Number(payment.cop_rate) || 3950);
-    if (currency === 'Bs') incomeBs = amountPaidUSD * (Number(payment.bs_rate) || 36.5);
+    if (currency === 'COP') incomeCOP = amountPaidUSD * copR;
+    if (currency === 'Bs') incomeBs = bsR > 0 ? (amountPaidUSD * copR) / bsR : 0;
   }
 
   return {
@@ -78,10 +80,14 @@ async function postCompletedOrderCashMovements(client, orderId) {
   const totalUSD = Number(order.total_usd) || 0;
   const pendingDebtUSD = Math.max(0, totalUSD - totals.paidUSD);
   const pendingChangeUSD = Math.max(0, totals.tenderedUSD - totalUSD - totals.changeGivenUSD);
-  const eligible = order.status === 'entregada'
-    && order.payment_status === 'pagado'
-    && pendingDebtUSD <= 0.01
-    && pendingChangeUSD <= 0.01;
+  const hasCopPayment = payments.some((p) => Number(p.cash_tendered_cop) > 0 || Number(p.change_given_cop) > 0);
+  const copRateFinalize = Number(order.cop_rate_at_payment) || 3100;
+  const copToleranceUSD = (hasCopPayment && copRateFinalize > 0) ? (1000 / copRateFinalize) : 0.05;
+  const maxToleranceUSD = Math.max(0.05, copToleranceUSD);
+
+  const isPaid = order.payment_status === 'pagado' || (pendingDebtUSD <= maxToleranceUSD && pendingChangeUSD <= maxToleranceUSD);
+  const isNotCancelled = order.status !== 'cancelado' && order.status !== 'fusionada';
+  const eligible = isPaid && isNotCancelled;
 
   if (!eligible) {
     const deletion = await client.query(

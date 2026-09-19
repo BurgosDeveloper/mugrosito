@@ -38,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('basilico_sidebar_collapsed') === 'true';
+      return localStorage.getItem('mugrosito_sidebar_collapsed') === 'true';
     } catch {
       return false;
     }
@@ -48,7 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsCollapsed((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem('basilico_sidebar_collapsed', String(next));
+        localStorage.setItem('mugrosito_sidebar_collapsed', String(next));
       } catch {}
       return next;
     });
@@ -342,7 +342,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {!isCollapsed && (
                     <div className="text-left">
                       <div className="text-sm font-black">Gestión Menú</div>
-                      <div className="text-[10px] text-gray-500 font-normal">Hamburguesas, Bebidas y Precios</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Hot Dogs, Bebidas y Precios</div>
                     </div>
                   )}
                 </div>
@@ -362,11 +362,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex items-center justify-between pb-3 border-b border-gray-200 mb-3">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-yellow-400 border border-yellow-500 p-0.5 flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
-            <img src="/logo_default.png" alt="Crispy Burger" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }} />
+            <img src="/logo_default.png" alt="Mugrosito" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }} />
           </div>
           {!isCollapsed && (
             <span className="font-black text-sm tracking-wider text-black">
-              CRISPY POS
+              MUGROSITO POS
             </span>
           )}
         </div>
@@ -467,7 +467,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   : 'bg-white hover:bg-yellow-50 text-gray-800 border border-gray-200'
               }`}
             >
-              <span>🍔</span>
+              <span>🌭</span>
               {!isCollapsed && <span>Menú</span>}
             </button>
           </div>

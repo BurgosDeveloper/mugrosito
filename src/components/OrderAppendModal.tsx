@@ -6,7 +6,6 @@ import { BurgerBuilderModal, BurgerOrderConfirmationItem } from '../modules/mese
 import { DrinkSelectorModal, DrinkOrderConfirmationItem } from '../modules/mesero/DrinkSelectorModal';
 import { DeliveryConfigPanel } from '../modules/mesero/DeliveryConfigPanel';
 import { AdminPinModal } from './AdminPinModal';
-import { roundCOP } from '../utils/currencyRounding';
 import { areProteinsDefault, getCleanItemNote, normalizeProteinName, formatRemovedIngredients } from '../utils/burgerProteins';
 import { isCustomizableProduct } from '../utils/productClassifier';
 import {
@@ -49,7 +48,15 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
   // Estado para bebida seleccionada (sabores / jugos)
   const [selectedDrink, setSelectedDrink] = useState<Product | null>(null);
   const [editingAppendItem, setEditingAppendItem] = useState<{ index: number; item: OrderItem } | null>(null);
-  const [deliveryFeeUSD, setDeliveryFeeUSD] = useState<number>(order?.deliveryFeeUSD || 0);
+  const copRateInitial = exchangeRates?.COP || 3100;
+  const getOrderDeliveryFeeCOP = (ord: Order | null) => {
+    if (!ord) return 0;
+    if (ord.deliveryFeeCOP !== undefined && ord.deliveryFeeCOP !== null) return Number(ord.deliveryFeeCOP);
+    if (ord.deliveryFeeUSD && copRateInitial > 0) return Math.round(Number(ord.deliveryFeeUSD) * copRateInitial);
+    return 0;
+  };
+
+  const [deliveryFeeUSD, setDeliveryFeeUSD] = useState<number>(() => getOrderDeliveryFeeCOP(order));
   const [customerName, setCustomerName] = useState<string>(order?.customerName || '');
   const [kitchenNotes, setKitchenNotes] = useState<string>(order?.kitchenNotes || '');
   const [showDeliveryConfig, setShowDeliveryConfig] = useState<boolean>(false);
@@ -82,12 +89,13 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
       setSelectedBurger(null);
       setSelectedDrink(null);
       setEditingAppendItem(null);
-      setDeliveryFeeUSD(order?.deliveryFeeUSD || 0);
+      setDeliveryFeeUSD(getOrderDeliveryFeeCOP(order));
       setCustomerName(order?.customerName || '');
       setKitchenNotes(order?.kitchenNotes || '');
       setShowDeliveryConfig(order?.type === 'delivery');
     }
-  }, [isOpen, order?.id, order?.deliveryFeeUSD, order?.type, order?.customerName, order?.kitchenNotes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, order?.id, order?.deliveryFeeCOP, order?.deliveryFeeUSD, order?.type, order?.customerName, order?.kitchenNotes]);
 
   // Filtrar productos por turno si aplica
   const activeProducts = useMemo(() => {
@@ -104,7 +112,14 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
 
   const availableFreeToppings = useMemo(() => {
     return ingredients
-      .filter((i) => (i.ingredientType === 'gratis' || i.category === 'Gratis') && (!i.shift || i.shift === 'ambos' || i.shift === userSession?.shift))
+      .filter(
+        (i) =>
+          (i.ingredientType?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'toppings gratis') &&
+          (!i.shift || i.shift === 'ambos' || i.shift === userSession?.shift) &&
+          i.available !== false
+      )
       .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
   }, [ingredients, userSession?.shift]);
 
@@ -276,7 +291,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
       id: item.productId,
       name: item.productName,
       price: estimatedBasePrice,
-      category: item.category || 'Hamburguesas',
+      category: item.category || 'Hot Dogs',
       baseIngredients: [],
     } as Product;
 
@@ -298,7 +313,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
     }
   };
 
-  // Confirmar adición o edición de hamburguesa desde la sección INLINE
+  // Confirmar adición o edición de hot dog desde la sección INLINE
   const handleConfirmBurgerAdd = (
     configOrList: BurgerOrderConfirmationItem | BurgerOrderConfirmationItem[]
   ) => {
@@ -309,7 +324,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
       productName: config.burger.name,
       price: config.finalPrice,
       quantity: config.quantity,
-      category: config.burger.category || 'Hamburguesas',
+      category: config.burger.category || 'Hot Dogs',
       proteins: config.proteins && config.proteins.length > 0 ? config.proteins : undefined,
       removedIngredients: config.removedIngredients && config.removedIngredients.length > 0 ? config.removedIngredients : undefined,
       extras: config.extras && config.extras.length > 0 ? config.extras : undefined,
@@ -337,11 +352,11 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
         }
         return current;
       });
-      setSuccessToast(`¡${list.length} hamburguesa(s) agregada(s)!`);
+      setSuccessToast(`¡${list.length} producto(s) agregado(s)!`);
     }
 
     if (list.some((c) => c.isDelivery) && deliveryFeeUSD <= 0) {
-      setDeliveryFeeUSD(1.0);
+      setDeliveryFeeUSD(2000);
     }
     setSelectedBurger(null);
     setTimeout(() => setSuccessToast(''), 2500);
@@ -362,7 +377,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
         (order.items || []).some((it) => it.isDelivery && !removedItemIds.includes(it.id));
 
       if (mode === 'delivery') {
-        if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+        if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
         setShowDeliveryConfig(true);
       } else if (!stillHasDelivery && order.type !== 'delivery') {
         setDeliveryFeeUSD(0);
@@ -382,7 +397,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
       }))
     );
     if (isDelivery) {
-      if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+      if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
       setShowDeliveryConfig(true);
     } else {
       const existingHasDelivery = (order.items || []).some(
@@ -440,13 +455,16 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
     }
   };
 
-  // Cálculos de montos
-  const currentSubtotalUSD = (order.items || []).reduce((sum, item) => {
+  const copRate = exchangeRates?.COP || 3100;
+  const bsRate = exchangeRates?.Bs || 3.2;
+
+  // Cálculos de montos en COP nativo
+  const currentSubtotalCOP = (order.items || []).reduce((sum, item) => {
     if (removedItemIds.includes(item.id)) return sum;
     return sum + (item.price || 0) * (item.quantity || 1);
   }, 0);
 
-  const addedSubtotalUSD = itemsToAdd.reduce(
+  const addedSubtotalCOP = itemsToAdd.reduce(
     (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
     0
   );
@@ -455,8 +473,10 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
     (order.items || []).some((it) => it.isDelivery && !removedItemIds.includes(it.id)) ||
     itemsToAdd.some((it) => it.isDelivery);
   const isDeliveryOrder = order.type === 'delivery' || hasDeliveryItems;
-  const effectiveDeliveryFee = isDeliveryOrder ? deliveryFeeUSD : 0;
-  const newTotalUSD = currentSubtotalUSD + addedSubtotalUSD + effectiveDeliveryFee;
+  const effectiveDeliveryFeeCOP = isDeliveryOrder ? deliveryFeeUSD : 0;
+  const newTotalCOP = currentSubtotalCOP + addedSubtotalCOP + effectiveDeliveryFeeCOP;
+  const newTotalUSD = copRate > 0 ? (newTotalCOP / copRate) : 0;
+  const newTotalBs = bsRate > 0 ? (newTotalCOP / bsRate) : 0;
 
   // Detección si hay productos de cocina entre los agregados
   const hasKitchenItemsToAdd = itemsToAdd.some(
@@ -478,7 +498,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
         itemsToAdd,
         removedItemIds,
         targetPrinter,
-        effectiveDeliveryFee,
+        effectiveDeliveryFeeCOP,
         customerName,
         kitchenNotes
       );
@@ -490,8 +510,6 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
     }
   };
 
-  const copRate = exchangeRates?.COP || 3950;
-  const bsRate = exchangeRates?.Bs || 36.5;
   const cleanOrderNumber = order.orderNumber.toString().replace(/^#+/, '');
 
   return (
@@ -518,7 +536,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-gray-500 font-bold uppercase block mt-0.5">
-                Selección de Hamburguesas, Bebidas y Acompañantes para Adicionar
+                Selección de Hot Dogs, Bebidas y Acompañantes para Adicionar
               </span>
             </div>
           </div>
@@ -656,7 +674,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-xs font-black text-blue-950 uppercase">DELIVERY ACTIVO</span>
                         <span className="text-[11px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-md">
-                          +${effectiveDeliveryFee.toFixed(2)} USD
+                          +{Math.round(effectiveDeliveryFeeCOP).toLocaleString('es-CO')} COP
                         </span>
                       </div>
                       <span className="text-[11px] font-bold text-blue-800 truncate block mt-0.5">
@@ -686,7 +704,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                   <span>Resumen de la Comanda</span>
                 </span>
                 <span className="text-xs font-black text-gray-700 bg-white px-2 py-0.5 rounded-lg border border-gray-200 shadow-xs">
-                  Actual: ${currentSubtotalUSD.toFixed(2)} USD
+                  Actual: {Math.round(currentSubtotalCOP).toLocaleString('es-CO')} COP
                 </span>
               </div>
 
@@ -727,7 +745,9 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                             )}
                           </div>
                           <div className="text-xs text-gray-600 font-bold mt-0.5">
-                            ${((it.price || 0) * (it.quantity || 1)).toFixed(2)} USD
+                            {((it.price || 0) >= 100)
+                              ? `${Math.round((it.price || 0) * (it.quantity || 1)).toLocaleString('es-CO')} COP`
+                              : `$${((it.price || 0) * (it.quantity || 1)).toFixed(2)} USD`}
                           </div>
                         </div>
 
@@ -757,7 +777,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                     </span>
                     {itemsToAdd.length > 0 && (
                       <span className="text-xs sm:text-sm font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-                        +${addedSubtotalUSD.toFixed(2)} USD
+                        +{Math.round(addedSubtotalCOP).toLocaleString('es-CO')} COP
                       </span>
                     )}
                   </div>
@@ -790,7 +810,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                     <div className="p-4 rounded-2xl border-2 border-dashed border-gray-300 bg-white text-center text-xs sm:text-sm font-bold text-gray-400 space-y-1">
                       <p>No has agregado nuevos productos todavía.</p>
                       <p className="text-xs text-gray-400">
-                        Toca una hamburguesa o bebida del catálogo para sumarla a esta comanda.
+                        Toca un hot dog o bebida del catálogo para sumarla a esta comanda.
                       </p>
                     </div>
                   ) : (
@@ -902,7 +922,7 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
 
                               <div className="text-right shrink-0">
                                 <span className="text-xs sm:text-sm font-black text-black">
-                                  ${((item.price || 0) * (item.quantity || 1)).toFixed(2)}
+                                  {Math.round((item.price || 0) * (item.quantity || 1)).toLocaleString('es-CO')} COP
                                 </span>
                               </div>
                             </div>
@@ -975,14 +995,14 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
             {/* TOTALES DE LA ADICIÓN Y BOTONES DE ACCIÓN */}
             <div className="bg-white p-3 sm:p-4 rounded-2xl border border-gray-200 shadow-xs space-y-2.5 shrink-0 mt-2">
               <div className="flex items-baseline justify-between font-bold text-xs sm:text-sm text-gray-600">
-                <span>Actual: ${currentSubtotalUSD.toFixed(2)}</span>
-                <span>+ Adición: <strong className="text-yellow-700 font-black">+${addedSubtotalUSD.toFixed(2)}</strong></span>
+                <span>Actual: {Math.round(currentSubtotalCOP).toLocaleString('es-CO')} COP</span>
+                <span>+ Adición: <strong className="text-yellow-700 font-black">+{Math.round(addedSubtotalCOP).toLocaleString('es-CO')} COP</strong></span>
               </div>
 
-              {isDeliveryOrder && effectiveDeliveryFee > 0 && (
+              {isDeliveryOrder && effectiveDeliveryFeeCOP > 0 && (
                 <div className="flex items-baseline justify-between font-bold text-xs sm:text-sm text-gray-600">
                   <span>Costo Delivery:</span>
-                  <span className="text-blue-700 font-black">+${effectiveDeliveryFee.toFixed(2)} USD</span>
+                  <span className="text-blue-700 font-black">+{Math.round(effectiveDeliveryFeeCOP).toLocaleString('es-CO')} COP</span>
                 </div>
               )}
 
@@ -990,10 +1010,10 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
                 <span className="text-xs sm:text-sm font-black text-gray-800 uppercase">Nuevo Total:</span>
                 <div className="text-right">
                   <span className="text-xl sm:text-2xl font-black text-black">
-                    ${newTotalUSD.toFixed(2)} <span className="text-xs font-bold text-gray-500">USD</span>
+                    {Math.round(newTotalCOP).toLocaleString('es-CO')} <span className="text-xs font-bold text-gray-500">COP</span>
                   </span>
                   <div className="text-xs font-bold text-gray-600 mt-0.5">
-                    🇨🇴 ${roundCOP(newTotalUSD * copRate).toLocaleString()} COP • 🇻🇪 {(newTotalUSD * bsRate).toFixed(2)} Bs
+                    🇺🇸 ${newTotalUSD.toFixed(2)} USD • 🇻🇪 {newTotalBs.toFixed(2)} Bs
                   </div>
                 </div>
               </div>

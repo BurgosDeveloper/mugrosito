@@ -97,7 +97,7 @@ export const CajaPage: React.FC = () => {
   const [printerSelectKitchenOrder, setPrinterSelectKitchenOrder] = useState<Order | null>(null);
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState<boolean>(false);
   const [isCompactView, setIsCompactView] = useState<boolean>(() => {
-    return localStorage.getItem('crispy_caja_view_mode') !== 'expanded';
+    return localStorage.getItem('mugrosito_caja_view_mode') !== 'expanded';
   });
   const [expandedOrderIds, setExpandedOrderIds] = useState<string[]>([]);
   const toggleExpandOrder = (orderId: string) => {
@@ -218,6 +218,14 @@ export const CajaPage: React.FC = () => {
   const { mergeOrders } = useApp();
 
   const handleOpenPayModal = (order: Order) => {
+    const hasSplit = (order.paymentHistory || []).some(
+      (p) => Array.isArray(p.itemIds) && p.itemIds.length > 0
+    ) || (order.items || []).some((it) => it.isPaidIndividually);
+
+    if (hasSplit) {
+      handleOpenSplitItemsModal(order);
+      return;
+    }
     setSplitPaymentScope(null);
     setActiveOrderForPay(order);
   };
@@ -229,6 +237,14 @@ export const CajaPage: React.FC = () => {
   };
 
   const handleOpenSplitItemsModal = async (order: Order) => {
+    const hasGeneral = (order.paymentHistory || []).some(
+      (p) => (!Array.isArray(p.itemIds) || p.itemIds.length === 0) &&
+             ((p.amountPaidUSD || 0) > 0 || (p.cashTenderedCOP || 0) > 0 || (p.cashTenderedUSD || 0) > 0 || (p.cashTenderedBs || 0) > 0)
+    );
+    if (hasGeneral) {
+      alert('Esta comanda ya tiene abonos generales registrados. Debes continuar el cobro desde la opción COBRAR.');
+      return;
+    }
     setSplitPaymentScope(null);
     setIsEditingSplitPayment(false);
 
@@ -589,7 +605,7 @@ export const CajaPage: React.FC = () => {
                 onClick={() => {
                   const next = !isCompactView;
                   setIsCompactView(next);
-                  localStorage.setItem('crispy_caja_view_mode', next ? 'compact' : 'expanded');
+                  localStorage.setItem('mugrosito_caja_view_mode', next ? 'compact' : 'expanded');
                 }}
                 className={`px-3 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 border transition-all cursor-pointer shadow-xs ${
                   isCompactView
@@ -688,15 +704,24 @@ export const CajaPage: React.FC = () => {
 
                       {/* Los 3 montos en cada moneda */}
                       <div className="pt-2 space-y-1">
-                        <div className="text-lg font-black text-black leading-tight">
-                          ${ord.totalUSD.toFixed(2)} <span className="text-xs font-bold text-gray-500">USD</span>
-                        </div>
-                        <div className="text-xs font-bold text-gray-700">
-                          🇨🇴 ${roundCOP(ord.totalUSD * exchangeRates.COP).toLocaleString()} COP
-                        </div>
-                        <div className="text-xs font-bold text-gray-700">
-                          🇻🇪 {(ord.totalUSD * exchangeRates.Bs).toFixed(2)} Bs
-                        </div>
+                        {(() => {
+                          const totalCOP = ord.totalCOP || roundCOP(ord.totalUSD * exchangeRates.COP);
+                          const totalUSD = ord.totalCOP ? (ord.totalCOP / (exchangeRates.COP || 3100)) : ord.totalUSD;
+                          const totalBs = ord.totalCOP ? (ord.totalCOP / (exchangeRates.Bs || 3.2)) : ((ord.totalUSD * (exchangeRates.COP || 3100)) / (exchangeRates.Bs || 3.2));
+                          return (
+                            <>
+                              <div className="text-lg font-black text-black leading-tight">
+                                {Math.round(totalCOP).toLocaleString('es-CO')} <span className="text-xs font-bold text-gray-500">COP</span>
+                              </div>
+                              <div className="text-xs font-bold text-gray-700">
+                                🇺🇸 ${totalUSD.toFixed(2)} USD
+                              </div>
+                              <div className="text-xs font-bold text-gray-700">
+                                🇻🇪 {totalBs.toFixed(2)} Bs
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       {/* Si ya está pagada y no entregada, botón rápido para marcarla como entregada y quitarla de pantalla */}
@@ -836,7 +861,7 @@ export const CajaPage: React.FC = () => {
                               {(it.isCut || it.cutPreference === 'Picada') ? (
                                 <span className="text-red-700 font-black ml-1 text-[10px]">(🔪 PICADA)</span>
                               ) : (
-                                <span className="text-gray-600 font-bold ml-1 text-[10px]">(🍔 ENTERA)</span>
+                                <span className="text-gray-600 font-bold ml-1 text-[10px]">(🌭 ENTERO)</span>
                               )}
                               {it.isPaidIndividually && (
                                 <span className="px-1.5 py-0.5 rounded bg-green-100 border border-green-300 text-green-900 text-[9px] font-black uppercase">
@@ -845,7 +870,9 @@ export const CajaPage: React.FC = () => {
                               )}
                             </span>
                             <span className="text-black font-black text-xs shrink-0">
-                              ${(it.price * it.quantity).toFixed(2)}
+                              {it.price >= 100
+                                ? `${Math.round(it.price * it.quantity).toLocaleString('es-CO')} COP`
+                                : `$${(it.price * it.quantity).toFixed(2)}`}
                             </span>
                           </div>
 
@@ -895,41 +922,83 @@ export const CajaPage: React.FC = () => {
 
                     {/* Pricing breakdown & Multi-currency display */}
                     <div className="pt-2 border-t border-gray-200">
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-xs font-black text-gray-700 uppercase">Total Comanda:</span>
-                        <div className="text-right">
-                          <span className="text-xl font-black text-black">
-                            ${ord.totalUSD.toFixed(2)} USD
-                          </span>
-                          <div className="text-xs font-bold text-gray-700">
-                            🇨🇴 ${roundCOP(ord.totalUSD * exchangeRates.COP).toLocaleString()} COP | 🇻🇪 {(ord.totalUSD * exchangeRates.Bs).toFixed(2)} Bs
+                      {(() => {
+                        const totalCOP = ord.totalCOP || roundCOP(ord.totalUSD * exchangeRates.COP);
+                        const totalUSD = ord.totalCOP ? (ord.totalCOP / (exchangeRates.COP || 3100)) : ord.totalUSD;
+                        const totalBs = ord.totalCOP ? (ord.totalCOP / (exchangeRates.Bs || 3.2)) : ((ord.totalUSD * (exchangeRates.COP || 3100)) / (exchangeRates.Bs || 3.2));
+
+                        return (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-xs font-black text-gray-700 uppercase">Total Comanda:</span>
+                            <div className="text-right">
+                              <span className="text-xl font-black text-black">
+                                {Math.round(totalCOP).toLocaleString('es-CO')} COP
+                              </span>
+                              <div className="text-xs font-bold text-gray-700">
+                                🇺🇸 ${totalUSD.toFixed(2)} USD | 🇻🇪 {totalBs.toFixed(2)} Bs
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Action buttons */}
                     <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
                       {!isPaid ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPayModal(ord)}
-                            className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-sm flex items-center justify-center gap-2 border border-yellow-500 shadow-sm transition-all cursor-pointer"
-                          >
-                            <IoCashOutline className="text-base" />
-                            <span>COBRAR (${remaining > 0 ? remaining.toFixed(2) : ord.totalUSD.toFixed(2)})</span>
-                          </button>
+                        (() => {
+                          const hasSplitPayments = (ord.paymentHistory || []).some(
+                            (p) => Array.isArray(p.itemIds) && p.itemIds.length > 0
+                          ) || (ord.items || []).some((it) => it.isPaidIndividually);
 
-                          <button
-                            type="button"
-                            onClick={() => handleOpenSplitItemsModal(ord)}
-                            className="py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border-2 border-blue-300 font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                            title="Cobro dividido por personas o ítems individuales"
-                          >
-                            <span>👥 X PERSONAS</span>
-                          </button>
-                        </>
+                          const hasGeneralPayments = (ord.paymentHistory || []).some(
+                            (p) => (!Array.isArray(p.itemIds) || p.itemIds.length === 0) &&
+                                   ((p.amountPaidUSD || 0) > 0 || (p.cashTenderedCOP || 0) > 0 || (p.cashTenderedUSD || 0) > 0 || (p.cashTenderedBs || 0) > 0)
+                          );
+
+                          return (
+                            <>
+                              <button
+                                type="button"
+                                disabled={hasSplitPayments}
+                                onClick={() => handleOpenPayModal(ord)}
+                                className={
+                                  hasSplitPayments
+                                    ? "flex-1 py-2.5 rounded-xl bg-stone-100 text-stone-400 font-black text-xs flex items-center justify-center gap-1.5 border border-stone-300 cursor-not-allowed opacity-60 select-none"
+                                    : "flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-sm flex items-center justify-center gap-2 border border-yellow-500 shadow-sm transition-all cursor-pointer"
+                                }
+                                title={hasSplitPayments ? "Esta comanda se está cobrando por personas. Usa el botón '👥 X PERSONAS'." : undefined}
+                              >
+                                <IoCashOutline className={`text-base ${hasSplitPayments ? 'text-stone-400' : ''}`} />
+                                <span>
+                                  {hasSplitPayments
+                                    ? "COBRO BLOQUEADO (USA 'X PERSONAS')"
+                                    : `COBRAR (${Math.round(ord.totalCOP ? (ord.totalCOP - (ord.paidAmountUSD || 0) * (exchangeRates.COP || 3100)) : ((remaining > 0 ? remaining : ord.totalUSD) * exchangeRates.COP)).toLocaleString('es-CO')} COP)`}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={hasGeneralPayments}
+                                onClick={() => handleOpenSplitItemsModal(ord)}
+                                className={
+                                  hasGeneralPayments
+                                    ? "py-2.5 px-3 rounded-xl bg-stone-100 text-stone-400 border border-stone-300 font-black text-xs flex items-center justify-center gap-1.5 cursor-not-allowed opacity-60 select-none"
+                                    : hasSplitPayments
+                                    ? "py-2.5 px-3 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 font-black text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer animate-pulse"
+                                    : "py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border-2 border-blue-300 font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                                }
+                                title={
+                                  hasGeneralPayments
+                                    ? "Esta comanda ya tiene abonos generales registrados. Continúa desde 'COBRAR'."
+                                    : "Cobro dividido por personas o ítems individuales"
+                                }
+                              >
+                                <span>{hasSplitPayments ? '👥 CONTINUAR X PERSONAS' : '👥 X PERSONAS'}</span>
+                              </button>
+                            </>
+                          );
+                        })()
                       ) : (
                         <div className="py-2 px-3 rounded-xl bg-green-100 border border-green-300 text-green-900 text-xs font-black flex items-center gap-1">
                           <IoCheckmarkCircle className="text-base text-green-700" />
@@ -1151,7 +1220,7 @@ export const CajaPage: React.FC = () => {
                               {(it.isCut || it.cutPreference === 'Picada') ? (
                                 <span className="text-red-700 font-black ml-1 text-[10px]">(🔪 PICADA)</span>
                               ) : (
-                                <span className="text-gray-600 font-bold ml-1 text-[10px]">(🍔 ENTERA)</span>
+                                <span className="text-gray-600 font-bold ml-1 text-[10px]">(🌭 ENTERO)</span>
                               )}
                               {it.isPaidIndividually && (
                                 <span className="px-1.5 py-0.5 rounded bg-green-100 border border-green-300 text-green-900 text-[9px] font-black uppercase">
@@ -1160,7 +1229,9 @@ export const CajaPage: React.FC = () => {
                               )}
                             </span>
                             <span className="text-black font-black text-xs shrink-0">
-                              ${(it.price * it.quantity).toFixed(2)}
+                              {it.price >= 100
+                                ? `${Math.round(it.price * it.quantity).toLocaleString('es-CO')} COP`
+                                : `$${(it.price * it.quantity).toFixed(2)}`}
                             </span>
                           </div>
 
@@ -1210,33 +1281,38 @@ export const CajaPage: React.FC = () => {
 
                     {/* Pricing breakdown & Multi-currency display */}
                     {(() => {
+                      const totalCOP = ord.totalCOP || roundCOP(ord.totalUSD * exchangeRates.COP);
+                      const totalUSD = ord.totalCOP ? (ord.totalCOP / (exchangeRates.COP || 3100)) : ord.totalUSD;
+                      const totalBs = ord.totalCOP ? (ord.totalCOP / (exchangeRates.Bs || 3.2)) : ((ord.totalUSD * (exchangeRates.COP || 3100)) / (exchangeRates.Bs || 3.2));
+                      const paidCOP = (ord.paidAmountUSD || 0) * (exchangeRates.COP || 3100);
+                      const remainingCOP = Math.max(0, totalCOP - paidCOP);
                       const paid = ord.paidAmountUSD || 0;
-                      const remaining = Math.max(0, ord.totalUSD - paid);
+
                       return (
                         <div className="space-y-1.5">
                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-yellow-50/80 p-2.5 rounded-xl border border-yellow-300 gap-2">
                             <div className="space-y-0.5 w-full sm:w-auto">
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="text-xs font-black text-gray-900 bg-white border border-gray-300 px-2 py-0.5 rounded shadow-xs">
-                                  🇨🇴 {roundCOP(ord.totalUSD * exchangeRates.COP).toLocaleString()} COP
+                                  🇺🇸 ${totalUSD.toFixed(2)} USD
                                 </span>
                                 <span className="text-xs font-black text-gray-900 bg-white border border-gray-300 px-2 py-0.5 rounded shadow-xs">
-                                  🇻🇪 {(ord.totalUSD * exchangeRates.Bs).toFixed(2)} Bs
+                                  🇻🇪 {totalBs.toFixed(2)} Bs
                                 </span>
                               </div>
                               {paid > 0 && (
                                 <div className="text-[10px] font-black text-green-700">
-                                  Abonado: ${paid.toFixed(2)} USD | Pendiente: ${remaining.toFixed(2)} USD
+                                  Abonado: {Math.round(paidCOP).toLocaleString('es-CO')} COP | Pendiente: {Math.round(remainingCOP).toLocaleString('es-CO')} COP
                                 </div>
                               )}
                             </div>
                             <div className="text-left sm:text-right w-full sm:w-auto">
                               <div className="text-xl font-black text-black leading-tight">
-                                ${ord.totalUSD.toFixed(2)} <span className="text-xs font-bold text-gray-600">USD</span>
+                                {Math.round(totalCOP).toLocaleString('es-CO')} <span className="text-xs font-bold text-gray-600">COP</span>
                               </div>
-                              {remaining > 0 && paid > 0 && (
+                              {remainingCOP > 0 && paid > 0 && (
                                 <span className="text-[10px] font-black text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200 inline-block">
-                                  Resta: ${remaining.toFixed(2)} USD
+                                  Resta: {Math.round(remainingCOP).toLocaleString('es-CO')} COP
                                 </span>
                               )}
                             </div>
@@ -1280,31 +1356,60 @@ export const CajaPage: React.FC = () => {
                       )}
 
                       {!isPaid ? (
-                        <>
-                          {(() => {
-                            const hasIndividualPayments = ord.paymentHistory?.some((payment) => (payment.itemIds?.length || 0) > 0);
-                            return hasIndividualPayments ? (
-                              <div className="w-full rounded-xl border border-blue-400/40 bg-blue-500/15 px-2 py-2.5 text-center text-xs font-black text-blue-200" title="Los pagos restantes deben registrarse por persona">
-                                👥 POR PERSONA
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleOpenPayModal(ord)}
-                                className="w-full py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs flex items-center justify-center gap-1.5 border border-yellow-500 shadow-sm transition-all"
-                              >
-                                <IoCashOutline className="text-base" />
-                                <span>💳 COBRAR (${(ord.totalUSD - (ord.paidAmountUSD || 0)).toFixed(2)})</span>
-                              </button>
-                            );
-                          })()}
+                        (() => {
+                          const hasSplitPayments = (ord.paymentHistory || []).some(
+                            (p) => Array.isArray(p.itemIds) && p.itemIds.length > 0
+                          ) || (ord.items || []).some((it) => it.isPaidIndividually);
 
-                          <button
-                            onClick={() => handleOpenSplitItemsModal(ord)}
-                            className="w-full py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 font-black text-xs flex items-center justify-center gap-1 transition-all"
-                          >
-                            <span>👥 X PERSONAS</span>
-                          </button>
-                        </>
+                          const hasGeneralPayments = (ord.paymentHistory || []).some(
+                            (p) => (!Array.isArray(p.itemIds) || p.itemIds.length === 0) &&
+                                   ((p.amountPaidUSD || 0) > 0 || (p.cashTenderedCOP || 0) > 0 || (p.cashTenderedUSD || 0) > 0 || (p.cashTenderedBs || 0) > 0)
+                          );
+
+                          const totalCOP = ord.totalCOP || roundCOP(ord.totalUSD * exchangeRates.COP);
+                          const paidCOP = (ord.paidAmountUSD || 0) * (exchangeRates.COP || 3100);
+                          const remainingCOP = Math.max(0, totalCOP - paidCOP);
+
+                          return (
+                            <>
+                              {hasSplitPayments ? (
+                                <div
+                                  className="w-full rounded-xl border border-stone-300 bg-stone-100 px-2 py-2.5 text-center text-xs font-black text-stone-400 select-none cursor-not-allowed"
+                                  title="Esta comanda se está cobrando por personas. Continúa desde '👥 X PERSONAS'"
+                                >
+                                  COBRO BLOQUEADO
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleOpenPayModal(ord)}
+                                  className="w-full py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs flex items-center justify-center gap-1.5 border border-yellow-500 shadow-sm transition-all cursor-pointer"
+                                >
+                                  <IoCashOutline className="text-base" />
+                                  <span>💳 COBRAR ({Math.round(remainingCOP > 0 ? remainingCOP : totalCOP).toLocaleString('es-CO')} COP)</span>
+                                </button>
+                              )}
+
+                              <button
+                                disabled={hasGeneralPayments}
+                                onClick={() => handleOpenSplitItemsModal(ord)}
+                                className={`w-full py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1 transition-all ${
+                                  hasGeneralPayments
+                                    ? "bg-stone-100 text-stone-400 border border-stone-300 cursor-not-allowed opacity-60 select-none"
+                                    : hasSplitPayments
+                                    ? "bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 shadow-sm cursor-pointer animate-pulse"
+                                    : "bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 cursor-pointer"
+                                }`}
+                                title={
+                                  hasGeneralPayments
+                                    ? "Esta comanda ya tiene abonos generales registrados. Continúa desde 'COBRAR'."
+                                    : "Cobro dividido por personas o ítems individuales"
+                                }
+                              >
+                                <span>{hasSplitPayments ? '👥 CONTINUAR X PERSONAS' : '👥 X PERSONAS'}</span>
+                              </button>
+                            </>
+                          );
+                        })()
                       ) : (
                         <div className="p-2 rounded-xl bg-green-100 border border-green-300 text-green-900 text-[11px] font-black text-center flex items-center justify-center gap-1 sm:col-span-2">
                           <IoCheckmarkCircle className="text-sm text-green-700" />
@@ -1493,18 +1598,25 @@ export const CajaPage: React.FC = () => {
 
                       {/* Items List */}
                       <div className="space-y-1.5 bg-gray-50 p-3 rounded-xl border border-gray-100 text-xs font-semibold text-gray-900">
-                        {(ord.items || []).map((it) => (
-                          <div key={it.id} className="text-xs font-bold text-gray-800 flex justify-between border-b border-gray-200/60 pb-1 last:border-0">
-                            <span>• {it.quantity}x {it.productName}</span>
-                            <span className="text-black font-black">${(it.price * it.quantity).toFixed(2)}</span>
-                          </div>
-                        ))}
-                        {ord.type === 'delivery' && (ord.deliveryFeeUSD || 0) > 0 && (
-                          <div className="text-xs font-bold text-gray-800 flex justify-between border-t border-gray-200 pt-1">
-                            <span>• Servicio delivery</span>
-                            <span className="text-black font-black">${ord.deliveryFeeUSD!.toFixed(2)}</span>
-                          </div>
-                        )}
+                        {(ord.items || []).map((it) => {
+                          const itLineCOP = it.price >= 100 ? (it.price * it.quantity) : Math.round(it.price * it.quantity * (ord.copRateAtPayment || exchangeRates.COP || 3100));
+                          return (
+                            <div key={it.id} className="text-xs font-bold text-gray-800 flex justify-between border-b border-gray-200/60 pb-1 last:border-0">
+                              <span>• {it.quantity}x {it.productName}</span>
+                              <span className="text-black font-black">{Math.round(itLineCOP).toLocaleString('es-CO')} COP</span>
+                            </div>
+                          );
+                        })}
+                        {ord.type === 'delivery' && (((ord as any).deliveryFeeCOP || 0) > 0 || (ord.deliveryFeeUSD || 0) > 0) && (() => {
+                          const delCOP = (ord as any).deliveryFeeCOP || (ord.deliveryFeeUSD && ord.deliveryFeeUSD >= 100 ? ord.deliveryFeeUSD : Math.round((ord.deliveryFeeUSD || 0) * (ord.copRateAtPayment || exchangeRates.COP || 3100)));
+                          if (delCOP <= 0) return null;
+                          return (
+                            <div className="text-xs font-bold text-gray-800 flex justify-between border-t border-gray-200 pt-1">
+                              <span>• Servicio delivery</span>
+                              <span className="text-black font-black">{Math.round(delCOP).toLocaleString('es-CO')} COP</span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {(userSession?.role === 'admin' || userSession?.role === 'caja') && (
@@ -2264,23 +2376,30 @@ export const CajaPage: React.FC = () => {
             </div>
             
             <div className="space-y-2">
-              {historicDetailOrder.items.map((it) => (
-                <div key={it.id} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
-                  <div className="flex justify-between items-center text-xs font-bold text-black">
-                    <span>{it.quantity}x {it.productName}</span>
-                    <span className="text-black font-black">${(it.price * it.quantity).toFixed(2)}</span>
+              {historicDetailOrder.items.map((it) => {
+                const itLineCOP = it.price >= 100 ? (it.price * it.quantity) : Math.round(it.price * it.quantity * (historicDetailOrder.copRateAtPayment || exchangeRates.COP || 3100));
+                return (
+                  <div key={it.id} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                    <div className="flex justify-between items-center text-xs font-bold text-black">
+                      <span>{it.quantity}x {it.productName}</span>
+                      <span className="text-black font-black">{Math.round(itLineCOP).toLocaleString('es-CO')} COP</span>
+                    </div>
+                    {it.extras && it.extras.length > 0 && (
+                      <div className="text-[10px] text-gray-500 mt-0.5">Extras: {it.extras.map(e => `${(e.quantity && e.quantity > 1) ? `${e.quantity}x ` : ''}${e.name}`).join(', ')}</div>
+                    )}
                   </div>
-                  {it.extras && it.extras.length > 0 && (
-                    <div className="text-[10px] text-gray-500 mt-0.5">Extras: {it.extras.map(e => `${(e.quantity && e.quantity > 1) ? `${e.quantity}x ` : ''}${e.name}`).join(', ')}</div>
-                  )}
-                </div>
-              ))}
-              {historicDetailOrder.type === 'delivery' && (historicDetailOrder.deliveryFeeUSD || 0) > 0 && (
-                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 flex justify-between items-center text-xs font-bold text-black">
-                  <span>Servicio delivery</span>
-                  <span className="text-black font-black">${historicDetailOrder.deliveryFeeUSD!.toFixed(2)}</span>
-                </div>
-              )}
+                );
+              })}
+              {historicDetailOrder.type === 'delivery' && (((historicDetailOrder as any).deliveryFeeCOP || 0) > 0 || (historicDetailOrder.deliveryFeeUSD || 0) > 0) && (() => {
+                const delCOP = (historicDetailOrder as any).deliveryFeeCOP || (historicDetailOrder.deliveryFeeUSD && historicDetailOrder.deliveryFeeUSD >= 100 ? historicDetailOrder.deliveryFeeUSD : Math.round((historicDetailOrder.deliveryFeeUSD || 0) * (historicDetailOrder.copRateAtPayment || exchangeRates.COP || 3100)));
+                if (delCOP <= 0) return null;
+                return (
+                  <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 flex justify-between items-center text-xs font-bold text-black">
+                    <span>Servicio delivery</span>
+                    <span className="text-black font-black">{Math.round(delCOP).toLocaleString('es-CO')} COP</span>
+                  </div>
+                );
+              })()}
             </div>
 
             {(() => {
@@ -2290,9 +2409,11 @@ export const CajaPage: React.FC = () => {
               const totalGivenBs = history.reduce((sum, p) => sum + (p.changeGivenBs || 0), 0);
 
               const grandTotalChangeUSD = history.reduce((sum, p) => {
+                const copR = p.copRate || exchangeRates.COP || 3100;
+                const bsR = p.bsRate || exchangeRates.Bs || 3.2;
                 const usd = p.changeGivenUSD || 0;
-                const copUsd = (p.changeGivenCOP || 0) / (p.copRate || exchangeRates.COP);
-                const bsUsd = (p.changeGivenBs || 0) / (p.bsRate || exchangeRates.Bs);
+                const copUsd = copR > 0 ? (p.changeGivenCOP || 0) / copR : 0;
+                const bsUsd = (copR > 0 && bsR > 0) ? ((p.changeGivenBs || 0) * bsR) / copR : 0;
                 return sum + usd + copUsd + bsUsd;
               }, 0);
 
@@ -2425,6 +2546,7 @@ export const CajaPage: React.FC = () => {
           onClose={() => setOrderEditModalOrder(null)}
           products={products}
           ingredients={ingredients}
+          exchangeRates={exchangeRates}
           onSaveEdit={async (orderId, payload) => {
             await editOrder(orderId, {
               ...payload,

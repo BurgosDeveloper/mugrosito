@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Product, Ingredient, BurgerUnitConfig, OrderItem } from '../../data/mockData';
 import { getExtraPrice } from '../../utils/burgerPricing';
-import { roundCOP } from '../../utils/currencyRounding';
 import { getCleanItemNote, normalizeProteinName, areProteinsDefault, formatRemovedIngredients, getProteinIcon } from '../../utils/burgerProteins';
 import {
   IoClose,
@@ -22,16 +21,10 @@ export const AVAILABLE_BURGER_PROTEINS = [
   { id: 'pollo_plancha', name: 'PECHUGA DE POLLO A LA PLANCHA', icon: '🍳' },
   { id: 'chuleta', name: 'CHULETA DE CERDO AHUMADA', icon: '🥓' },
   { id: 'mechada', name: 'CARNE MECHADA', icon: '🍲' },
-  { id: 'smash', name: 'SMASH DE CARNE', icon: '🍔' },
+  { id: 'smash', name: 'SMASH DE CARNE', icon: '🥩' },
 ];
 
-export const STRICT_FREE_TOPPINGS = [
-  { id: 'free-jalapenos', name: 'Jalapeños Picantes' },
-  { id: 'free-cebolla-caram', name: 'Cebolla Caramelizada' },
-  { id: 'free-sweet-relish', name: 'Sweet Relish' },
-  { id: 'free-maiz', name: 'Maíz' },
-  { id: 'free-pepinillos', name: 'Pepinillos' },
-];
+export const STRICT_FREE_TOPPINGS: Array<{ id: string; name: string }> = [];
 
 const DEFAULT_BURGER_BASE_INGREDIENTS = [
   'Pan Brioche',
@@ -241,7 +234,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
   onConfirm,
   defaultTakeaway = false,
   defaultDelivery = false,
-  exchangeRates = { COP: 3950, Bs: 36.5 },
+  exchangeRates = { COP: 3100, Bs: 3.2 },
   inline = false,
   initialEditItem,
 }) => {
@@ -294,14 +287,24 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, burger?.id, initialEditItem?.id]);
 
-  // Lista dinámica de Toppings Gratis (leídos desde la BD vía availableFreeToppings o filtrados de availableExtras, con fallback seguro)
+  // Lista dinámica de Toppings Gratis (leídos exclusivamente desde la BD vía availableFreeToppings o filtrados de availableExtras)
   const freeToppingsList = useMemo(() => {
     let list: Ingredient[] = [];
     if (availableFreeToppings && availableFreeToppings.length > 0) {
-      list = availableFreeToppings;
+      list = availableFreeToppings.filter(
+        (i) =>
+          (i.ingredientType?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'toppings gratis') &&
+          i.available !== false
+      );
     } else if (availableExtras && availableExtras.length > 0) {
       list = availableExtras.filter(
-        (i) => i.ingredientType === 'gratis' || i.category?.toLowerCase() === 'gratis'
+        (i) =>
+          (i.ingredientType?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'toppings gratis') &&
+          i.available !== false
       );
     }
 
@@ -314,7 +317,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
       }));
     }
 
-    return STRICT_FREE_TOPPINGS.map((t) => ({ ...t, rawName: t.name }));
+    return [];
   }, [availableFreeToppings, availableExtras]);
 
   // Lista de Adicionales Pagos (excluyendo cualquier adicional gratis de la BD para evitar duplicados)
@@ -402,7 +405,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
             }
       )
     );
-    setCopyToast(`¡Personalización de #${activeUnitIndex + 1} copiada a las ${units.length} hamburguesas!`);
+    setCopyToast(`¡Personalización de #${activeUnitIndex + 1} copiada a las ${units.length} unidades!`);
     setTimeout(() => setCopyToast(''), 2500);
   };
 
@@ -411,7 +414,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
     if (!burger) return;
     const fresh = createInitialUnitConfig(activeUnitIndex, burger, defaultTakeaway, defaultDelivery, effectiveProteins);
     updateCurrentUnit(() => fresh);
-    setCopyToast(`Hamburguesa #${activeUnitIndex + 1} restablecida a su receta base.`);
+    setCopyToast(`Ítem #${activeUnitIndex + 1} restablecido a su receta base.`);
     setTimeout(() => setCopyToast(''), 2000);
   };
 
@@ -535,16 +538,20 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
     });
   };
 
-  const copRate = exchangeRates?.COP || 3950;
-  const bsRate = exchangeRates?.Bs || 36.5;
+  const copRate = exchangeRates?.COP || 3100;
+  const bsRate = exchangeRates?.Bs || 3.2;
 
   const currentUnitExtrasTotal = currentUnit.selectedPaidExtras.reduce((sum, e) => sum + e.price, 0);
   const currentUnitPrice = burger.price + currentUnitExtrasTotal;
+  const currentUnitUSD = copRate > 0 ? currentUnitPrice / copRate : 0;
+  const currentUnitBs = bsRate > 0 ? currentUnitPrice / bsRate : 0;
 
   const grandTotalPrice = units.reduce(
     (total, u) => total + (burger.price + u.selectedPaidExtras.reduce((sum, e) => sum + e.price, 0)),
     0
   );
+  const grandTotalUSD = copRate > 0 ? grandTotalPrice / copRate : 0;
+  const grandTotalBs = bsRate > 0 ? grandTotalPrice / bsRate : 0;
 
   const handleSave = () => {
     if (!burger || units.length === 0) return;
@@ -607,7 +614,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
       {/* 1. TOP HEADER (CORTE COMPACTO Y CLARO) */}
       <header className={`bg-white text-gray-900 ${inline ? 'px-3.5 py-2' : 'px-4 sm:px-6 py-3.5'} flex items-center justify-between border-b-2 border-yellow-400 shrink-0 shadow-xs`}>
         <div className="flex items-center gap-3 flex-wrap">
-          <span className={inline ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl"}>🍔</span>
+          <span className={inline ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl"}>🌭</span>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className={`${inline ? 'text-xl sm:text-2xl' : 'text-2xl sm:text-3xl'} font-black text-gray-950 tracking-wide flex items-center gap-2`}>
@@ -634,14 +641,14 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2 mt-1 text-xs sm:text-base font-black text-gray-700 flex-wrap">
-              <span className="text-black text-base sm:text-lg font-black">${currentUnitPrice.toFixed(2)} USD</span>
+              <span className="text-black text-base sm:text-lg font-black">🇨🇴 {Math.round(currentUnitPrice).toLocaleString('es-CO')} COP</span>
               {currentUnitExtrasTotal > 0 && (
-                <span className="text-emerald-700 text-xs sm:text-sm font-bold">(Base ${burger.price.toFixed(2)} + Adicionales ${currentUnitExtrasTotal.toFixed(2)})</span>
+                <span className="text-emerald-700 text-xs sm:text-sm font-bold">(Base {Math.round(burger.price).toLocaleString('es-CO')} + Adic. {Math.round(currentUnitExtrasTotal).toLocaleString('es-CO')} COP)</span>
               )}
               <span className="text-gray-400">•</span>
-              <span>🇨🇴 {roundCOP(currentUnitPrice * copRate).toLocaleString()} COP</span>
+              <span>🇺🇸 ${currentUnitUSD.toFixed(2)} USD</span>
               <span className="text-gray-400">•</span>
-              <span>🇻🇪 {(currentUnitPrice * bsRate).toFixed(2)} Bs</span>
+              <span>🇻🇪 {currentUnitBs.toFixed(2)} Bs</span>
             </div>
           </div>
         </div>
@@ -669,7 +676,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
                 type="button"
                 onClick={handleDecreaseQuantity}
                 className="px-3.5 py-1.5 hover:bg-yellow-100 text-black font-black text-lg transition-colors cursor-pointer"
-                title="Disminuir hamburguesas"
+                title="Disminuir unidades"
               >
                 <IoRemove />
               </button>
@@ -680,7 +687,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
                 type="button"
                 onClick={handleIncreaseQuantity}
                 className="px-3.5 py-1.5 hover:bg-yellow-100 text-black font-black text-lg transition-colors cursor-pointer"
-                title="Agregar otra hamburguesa para personalizar"
+                title="Agregar otra unidad para personalizar"
               >
                 <IoAdd />
               </button>
@@ -689,7 +696,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
 
           {/* Opciones Rápidas: Para Llevar y Picada / Entera de la unidad activa */}
           <div className="flex items-center gap-2.5 flex-wrap">
-            {/* Destino de la Hamburguesa: Salón / Llevar / Delivery */}
+            {/* Destino del Producto: Salón / Llevar / Delivery */}
             <div className="flex items-center border border-gray-300 rounded-xl bg-white p-1 shadow-xs">
               <button
                 type="button"
@@ -761,7 +768,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
                     : 'text-gray-600 hover:text-black'
                 }`}
               >
-                🍔 ENTERA
+                🌭 ENTERO
               </button>
               <button
                 type="button"
@@ -790,7 +797,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs sm:text-sm font-black text-yellow-950 uppercase tracking-wide flex items-center gap-1.5">
-                  <span>🍔</span>
+                  <span>🌭</span>
                   <span>SELECCIONA LA UNIDAD A PERSONALIZAR ({units.length}):</span>
                 </span>
               </div>
@@ -850,7 +857,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
                         : 'bg-white text-gray-800 border-gray-200 hover:border-yellow-300 hover:bg-yellow-50/50'
                     }`}
                   >
-                    <span>🍔 #{idx + 1}</span>
+                    <span>🌭 #{idx + 1}</span>
                     {isModified ? (
                       <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-amber-200 text-amber-950">
                         Modificada
@@ -872,41 +879,43 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
           </section>
         )}
 
-        {/* 3. ADICIONALES Y TOPPINGS GRATIS DE LA BASE DE DATOS */}
-        <section className="bg-amber-50/60 p-3.5 sm:p-4 rounded-2xl border border-yellow-300 shadow-xs space-y-2.5">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="text-xs sm:text-sm font-black text-yellow-950 uppercase tracking-wide flex items-center gap-1.5">
-              <span>✨</span>
-              <span>
-                TOPPINGS & SALSAS GRATIS ({units.length > 1 ? `HAMBURGUESA #${activeUnitIndex + 1}` : 'DISPONIBLES'}):
+        {/* 3. ADICIONALES Y TOPPINGS GRATIS DE LA BASE DE DATOS (Solo se muestra si existen en la BD) */}
+        {freeToppingsList.length > 0 && (
+          <section className="bg-amber-50/60 p-3.5 sm:p-4 rounded-2xl border border-yellow-300 shadow-xs space-y-2.5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-xs sm:text-sm font-black text-yellow-950 uppercase tracking-wide flex items-center gap-1.5">
+                <span>✨</span>
+                <span>
+                  TOPPINGS & SALSAS GRATIS ({units.length > 1 ? `ÍTEM #${activeUnitIndex + 1}` : 'DISPONIBLES'}):
+                </span>
+              </h3>
+              <span className="text-xs font-black text-amber-900 bg-yellow-200/90 px-2.5 py-0.5 rounded-lg border border-yellow-300">
+                {currentUnit.selectedFreeToppings.length} seleccionados
               </span>
-            </h3>
-            <span className="text-xs font-black text-amber-900 bg-yellow-200/90 px-2.5 py-0.5 rounded-lg border border-yellow-300">
-              {currentUnit.selectedFreeToppings.length} seleccionados
-            </span>
-          </div>
+            </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-            {freeToppingsList.map((top) => {
-              const isSelected = currentUnit.selectedFreeToppings.includes(top.name);
-              return (
-                <button
-                  key={top.id}
-                  type="button"
-                  onClick={() => toggleFreeTopping(top.name)}
-                  className={`p-3 rounded-2xl text-center font-black text-xs sm:text-sm transition-all border-2 flex items-center justify-center gap-1.5 cursor-pointer ${
-                    isSelected
-                      ? 'bg-yellow-400 text-black border-yellow-500 shadow-sm scale-[1.02]'
-                      : 'bg-white text-gray-800 border-gray-200 hover:border-yellow-400 hover:bg-yellow-50/30'
-                  }`}
-                >
-                  <span className="truncate">{top.name}</span>
-                  <span className="font-black text-base">{isSelected ? '✓' : '+'}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+              {freeToppingsList.map((top) => {
+                const isSelected = currentUnit.selectedFreeToppings.includes(top.name);
+                return (
+                  <button
+                    key={top.id}
+                    type="button"
+                    onClick={() => toggleFreeTopping(top.name)}
+                    className={`p-3 rounded-2xl text-center font-black text-xs sm:text-sm transition-all border-2 flex items-center justify-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? 'bg-yellow-400 text-black border-yellow-500 shadow-sm scale-[1.02]'
+                        : 'bg-white text-gray-800 border-gray-200 hover:border-yellow-400 hover:bg-yellow-50/30'
+                    }`}
+                  >
+                    <span className="truncate">{top.name}</span>
+                    <span className="font-black text-base">{isSelected ? '✓' : '+'}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* 4. BOTONES DESPLEGABLES DE PROTEÍNAS Y ADICIONALES + SECCIÓN DE PERSONALIZAR ABIERTA */}
         <section className="space-y-3">
@@ -952,12 +961,12 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
                 <div className="text-left">
                   <div className="font-black leading-tight text-sm sm:text-base">
                     {units.length > 1
-                      ? `ADICIONALES ($) #${activeUnitIndex + 1}`
-                      : 'ADICIONALES CON COSTO ($)'}
+                      ? `ADICIONALES COP #${activeUnitIndex + 1}`
+                      : 'ADICIONALES CON COSTO (COP)'}
                   </div>
                   <div className="text-xs font-bold text-gray-500 mt-0.5">
                     {currentUnit.selectedPaidExtras.length > 0
-                      ? `+${currentUnit.selectedPaidExtras.reduce((s, e) => s + (e.quantity || 1), 0)} porción(es) (+${currentUnitExtrasTotal.toFixed(2)} USD)`
+                      ? `+${currentUnit.selectedPaidExtras.reduce((s, e) => s + (e.quantity || 1), 0)} porción(es) (+${Math.round(currentUnitExtrasTotal).toLocaleString('es-CO')} COP)`
                       : 'Sin adicionales con costo'}
                   </div>
                 </div>
@@ -971,7 +980,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
             <div className="bg-amber-50/40 p-3.5 sm:p-4 rounded-2xl border border-yellow-300 space-y-3 shadow-xs animate-in fade-in">
               <div className="flex items-center justify-between">
                 <span className="text-xs sm:text-sm font-black text-gray-900 uppercase">
-                  Selecciona la proteína para cada carne de la hamburguesa:
+                  Selecciona la proteína para cada carne:
                 </span>
                 <span className="text-xs font-black text-amber-950 bg-yellow-300 px-3 py-1 rounded-xl border border-yellow-400">
                   {currentUnit.proteins.length === 1 ? '1 Carne' : `${currentUnit.proteins.length} Carnes`}
@@ -1111,7 +1120,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
                               : 'bg-black/5 text-stone-900'
                           }`}
                         >
-                          +${displayPrice.toFixed(2)}
+                          +{Math.round(displayPrice).toLocaleString('es-CO')} COP
                         </span>
                       </div>
                     </button>
@@ -1126,7 +1135,7 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs sm:text-sm font-black text-gray-900 uppercase flex items-center gap-1.5">
                 <span>🛠️</span>
-                <span>PERSONALIZAR INGREDIENTES ({units.length > 1 ? `HAMBURGUESA #${activeUnitIndex + 1}` : 'TOCA PARA QUITAR "SIN"'}):</span>
+                <span>PERSONALIZAR INGREDIENTES ({units.length > 1 ? `ÍTEM #${activeUnitIndex + 1}` : 'TOCA PARA QUITAR "SIN"'}):</span>
               </span>
               <span className="text-xs font-bold text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg border border-red-200">
                 {currentUnit.removedIngredients.length > 0
@@ -1179,14 +1188,14 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
         <section className={`bg-white ${inline ? 'p-3 rounded-2xl space-y-1.5' : 'p-4 rounded-2xl space-y-2'} border border-gray-200 shadow-xs`}>
           <label className="block text-xs sm:text-sm font-black uppercase text-gray-900 tracking-wider">
             {units.length > 1
-              ? `Notas de preparación para Cocina (Hamburguesa #${activeUnitIndex + 1}):`
+              ? `Notas de preparación para Cocina (Ítem #${activeUnitIndex + 1}):`
               : 'Notas de preparación para Cocina:'}
           </label>
           <input
             type="text"
             value={currentUnit.notes}
             onChange={(e) => updateCurrentUnit((prev) => ({ ...prev, notes: e.target.value }))}
-            placeholder="Ej: Carne bien cocida, salsa aparte, bien caliente..."
+            placeholder="Ej: Salsa aparte, bien caliente..."
             className="w-full px-3.5 py-2 text-sm bg-stone-50 border border-gray-300 rounded-xl text-gray-900 font-bold focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 shadow-2xs"
           />
         </section>
@@ -1196,17 +1205,17 @@ export const BurgerBuilderModal: React.FC<BurgerBuilderModalProps> = ({
       <footer className={`bg-white text-gray-900 ${inline ? 'px-4 py-2.5' : 'px-6 py-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]'} border-t-2 border-yellow-400 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-lg`}>
         <div>
           <span className="text-xs font-black uppercase tracking-wider text-gray-500 block">
-            Total a sumar ({units.length} hamburguesa{units.length > 1 ? 's' : ''}):
+            Total a sumar ({units.length} {units.length > 1 ? 'ítems' : 'ítem'}):
           </span>
           <div className="flex items-baseline gap-2.5 flex-wrap">
             <span className={`${inline ? 'text-xl sm:text-2xl' : 'text-2xl sm:text-3xl'} font-black text-black`}>
-              ${grandTotalPrice.toFixed(2)} <span className="text-xs sm:text-sm font-bold text-gray-500">USD</span>
+              {Math.round(grandTotalPrice).toLocaleString('es-CO')} <span className="text-xs sm:text-sm font-bold text-gray-500">COP</span>
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇨🇴 {roundCOP(grandTotalPrice * copRate).toLocaleString()} COP
+              🇺🇸 ${grandTotalUSD.toFixed(2)} USD
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇻🇪 {(grandTotalPrice * bsRate).toFixed(2)} Bs
+              🇻🇪 {grandTotalBs.toFixed(2)} Bs
             </span>
           </div>
         </div>

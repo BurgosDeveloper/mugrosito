@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Order } from '../data/mockData';
 import { useApp } from '../context/AppContext';
-import { roundCOP } from '../utils/currencyRounding';
 import { areProteinsDefault, getCleanItemNote, formatRemovedIngredients } from '../utils/burgerProteins';
 import { PrinterSelectModal } from './PrinterSelectModal';
 import {
@@ -108,28 +107,41 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     setIsKitchenPrinterModalOpen(true);
   };
 
-  const totalUSD = order.totalUSD || 0;
+  const copRate = order.copRateAtPayment || exchangeRates.COP || 3100;
+  const bsRate = order.bsRateAtPayment || exchangeRates.Bs || 3.2;
+  const totalCOP = order.totalCOP || Math.round((order.totalUSD || 0) * copRate);
+  const totalUSD = order.totalUSD || (copRate > 0 ? totalCOP / copRate : 0);
   const paidAmountUSD = order.paidAmountUSD || 0;
   const remainingUSD = Math.max(0, totalUSD - paidAmountUSD);
-  const totalCOP = roundCOP(totalUSD * exchangeRates.COP);
-  const totalBs = (totalUSD * exchangeRates.Bs).toFixed(2);
+  const remainingCOP = Math.round(remainingUSD * copRate);
+  const totalBs = bsRate > 0 ? (totalCOP / bsRate).toFixed(2) : '0.00';
 
   const isPaid = order.paymentStatus === 'pagado';
   const isCredito = order.paymentStatus === 'credito';
   const isDelivered = order.status === 'entregada';
   const isPrepared = order.status === 'preparada';
 
+  const hasSplitPayments = (order.paymentHistory || []).some(
+    (p) => Array.isArray(p.itemIds) && p.itemIds.length > 0
+  ) || (order.items || []).some((it) => it.isPaidIndividually);
+
+  const hasGeneralPayments = (order.paymentHistory || []).some(
+    (p) => (!Array.isArray(p.itemIds) || p.itemIds.length === 0) &&
+           ((p.amountPaidUSD || 0) > 0 || (p.cashTenderedCOP || 0) > 0 || (p.cashTenderedUSD || 0) > 0 || (p.cashTenderedBs || 0) > 0)
+  );
+
   // Calculate sum of currently selected items if in selectable mode
-  const selectedTotalUSD = order.items
+  const selectedTotalCOP = order.items
     .filter((it) => selectedItemIds.includes(it.id))
     .reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+  const selectedTotalUSD = copRate > 0 ? selectedTotalCOP / copRate : 0;
 
   const cleanOrderNumber = order.orderNumber.toString().replace(/^#+/, '');
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
       <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-3xl overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Header Plano Crispy */}
+        {/* Header Plano Mugrosito */}
         <div className="bg-white border-b border-gray-200 text-black p-4 sm:p-5 flex items-center justify-between shadow-xs shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-12 h-12 rounded-2xl bg-yellow-100 border border-yellow-300 flex items-center justify-center font-black shrink-0 text-black">
@@ -273,7 +285,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       </div>
                     </div>
                     <span className="font-black text-base sm:text-lg text-emerald-700 shrink-0">
-                      ${itemTotal.toFixed(2)}
+                      {Math.round(itemTotal).toLocaleString('es-CO')} COP
                     </span>
                   </div>
 
@@ -324,7 +336,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       )}
                       {item.extras && item.extras.length > 0 && (
                         <div className="text-xs sm:text-sm font-bold pl-2 mt-1 text-emerald-700">
-                          {item.category && item.category !== 'Pizzas' && item.category !== 'Hamburguesas' ? '🥗 Contorno(s):' : '➕ ADD:'} {item.extras.map(e => `${(e.quantity && e.quantity > 1) ? `${e.quantity}x ` : ''}${e.name}${e.price > 0 ? ` (+$${e.price.toFixed(2)})` : ''}`).join(', ')}
+                          {item.category && item.category !== 'Pizzas' && item.category !== 'Hamburguesas' && item.category !== 'Hot Dogs' ? '🥗 Contorno(s):' : '➕ ADD:'} {item.extras.map(e => `${(e.quantity && e.quantity > 1) ? `${e.quantity}x ` : ''}${e.name}${e.price > 0 ? ` (+$${e.price.toFixed(2)})` : ''}`).join(', ')}
                         </div>
                       )}
                     </>
@@ -361,7 +373,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   <span className="font-black text-slate-900 text-base sm:text-lg">Servicio Delivery</span>
                 </div>
                 <span className="font-black text-base sm:text-lg text-emerald-700">
-                  ${(order.deliveryFeeUSD || 0).toFixed(2)}
+                  {((order.deliveryFeeCOP || (order.deliveryFeeUSD ? Math.round(order.deliveryFeeUSD * copRate) : 0))).toLocaleString('es-CO')} COP
                 </span>
               </div>
             )}
@@ -381,12 +393,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <div className="p-4 sm:p-5 rounded-2xl bg-amber-50/40 border border-yellow-300 space-y-2 shadow-xs">
             <div className="flex justify-between text-xs sm:text-sm font-bold text-gray-700">
               <span>Subtotal Productos:</span>
-              <span className="text-black font-black">${((order.totalUSD || 0) - (order.deliveryFeeUSD || 0)).toFixed(2)} USD</span>
+              <span className="text-black font-black">{Math.max(0, totalCOP - (order.deliveryFeeCOP || (order.deliveryFeeUSD ? Math.round(order.deliveryFeeUSD * copRate) : 0))).toLocaleString('es-CO')} COP</span>
             </div>
-            {order.deliveryFeeUSD ? (
+            {(order.deliveryFeeUSD || order.deliveryFeeCOP) ? (
               <div className="flex justify-between text-xs sm:text-sm font-bold text-gray-700">
                 <span>Servicio Delivery:</span>
-                <span className="text-black font-black">+${order.deliveryFeeUSD.toFixed(2)} USD</span>
+                <span className="text-black font-black">+{(order.deliveryFeeCOP || (order.deliveryFeeUSD ? Math.round(order.deliveryFeeUSD * copRate) : 0)).toLocaleString('es-CO')} COP</span>
               </div>
             ) : null}
             <div className="border-t border-yellow-200 pt-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -395,18 +407,18 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   Total de la Comanda:
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-black tracking-tight flex items-center gap-2">
-                  <span>${totalUSD.toFixed(2)}</span>
-                  <span className="text-xs sm:text-sm font-black uppercase text-black bg-yellow-400 px-2 py-0.5 rounded-lg border border-yellow-500 shadow-xs">USD</span>
+                  <span>{totalCOP.toLocaleString('es-CO')}</span>
+                  <span className="text-xs sm:text-sm font-black uppercase text-black bg-yellow-400 px-2 py-0.5 rounded-lg border border-yellow-500 shadow-xs">COP</span>
                   {paidAmountUSD > 0 && !isPaid && (
                     <span className="text-xs sm:text-sm font-extrabold text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg">
-                      Pagado: ${paidAmountUSD.toFixed(2)} | Debe: ${remainingUSD.toFixed(2)}
+                      Debe: {remainingCOP.toLocaleString('es-CO')} COP (~ ${remainingUSD.toFixed(2)} USD)
                     </span>
                   )}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs sm:text-sm font-black text-gray-800 bg-white border border-gray-300 px-3 py-1 rounded-xl shadow-xs">
-                  🇨🇴 {totalCOP.toLocaleString()} COP
+                  🇺🇸 ${totalUSD.toFixed(2)} USD
                 </span>
                 <span className="text-xs sm:text-sm font-black text-gray-800 bg-white border border-gray-300 px-3 py-1 rounded-xl shadow-xs">
                   🇻🇪 {totalBs} Bs
@@ -449,15 +461,28 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 {onPayOrder && !isPaid ? (
                   <button
                     type="button"
+                    disabled={hasSplitPayments}
                     onClick={() => {
                       onClose();
                       onPayOrder(order);
                     }}
-                    className="py-2.5 px-3 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 border border-yellow-500 shadow-sm transition-all cursor-pointer active:scale-95"
-                    title="Proceder al cobro de la comanda"
+                    className={`py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all ${
+                      hasSplitPayments
+                        ? "bg-stone-100 text-stone-400 border border-stone-300 cursor-not-allowed opacity-60 select-none"
+                        : "bg-yellow-400 hover:bg-yellow-500 text-black border border-yellow-500 shadow-sm cursor-pointer active:scale-95"
+                    }`}
+                    title={
+                      hasSplitPayments
+                        ? "Comanda en cobro por personas. Usa el botón '👥 X PERSONAS'."
+                        : "Proceder al cobro de la comanda"
+                    }
                   >
-                    <IoCashOutline className="text-base" />
-                    <span>COBRAR (${remainingUSD > 0 ? remainingUSD.toFixed(2) : totalUSD.toFixed(2)})</span>
+                    <IoCashOutline className={`text-base ${hasSplitPayments ? 'text-stone-400' : ''}`} />
+                    <span>
+                      {hasSplitPayments
+                        ? "COBRO BLOQUEADO"
+                        : `COBRAR ($${remainingUSD > 0 ? remainingUSD.toFixed(2) : totalUSD.toFixed(2)})`}
+                    </span>
                   </button>
                 ) : isPaid ? (
                   <div className="py-2.5 px-3 rounded-xl bg-green-100 border border-green-300 text-green-900 font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs">
@@ -486,15 +511,26 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 {onSplitPayment && !isPaid && (
                   <button
                     type="button"
+                    disabled={hasGeneralPayments}
                     onClick={() => {
                       onClose();
                       onSplitPayment(order);
                     }}
-                    className="py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border-2 border-blue-300 font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
-                    title="Cobro dividido por personas o ítems individuales"
+                    className={`py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95 ${
+                      hasGeneralPayments
+                        ? "bg-stone-100 text-stone-400 border border-stone-300 cursor-not-allowed opacity-60 select-none"
+                        : hasSplitPayments
+                        ? "bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 cursor-pointer animate-pulse"
+                        : "bg-blue-50 hover:bg-blue-100 text-blue-900 border-2 border-blue-300 cursor-pointer"
+                    }`}
+                    title={
+                      hasGeneralPayments
+                        ? "Esta comanda ya tiene abonos generales registrados. Continúa desde 'COBRAR'."
+                        : "Cobro dividido por personas o ítems individuales"
+                    }
                   >
                     <IoPeopleOutline className="text-base" />
-                    <span>👥 X PERSONAS</span>
+                    <span>{hasSplitPayments ? '👥 CONTINUAR X PERSONAS' : '👥 X PERSONAS'}</span>
                   </button>
                 )}
 

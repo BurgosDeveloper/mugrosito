@@ -39,6 +39,7 @@ export const MenuManagementPage: React.FC = () => {
     updatePrintersConfig,
     testPrinter,
     userSession,
+    exchangeRates,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'pizzas' | 'bebidas' | 'ingredientes' | 'mesas' | 'seguridad' | 'impresoras'>('pizzas');
@@ -73,7 +74,7 @@ export const MenuManagementPage: React.FC = () => {
   const [isAddPizzaOpen, setIsAddPizzaOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [pizzaName, setPizzaName] = useState('');
-  const [dishCategory, setDishCategory] = useState<string>('Hamburguesas');
+  const [dishCategory, setDishCategory] = useState<string>('Hot Dogs');
   const [pizzaPrice, setPizzaPrice] = useState('');
   const [pizzaDesc, setPizzaDesc] = useState('');
   const [burgerProteinCount, setBurgerProteinCount] = useState<number>(1);
@@ -94,7 +95,7 @@ export const MenuManagementPage: React.FC = () => {
   const handleStartEditPizza = (product: Product) => {
     setEditingProductId(product.id);
     setPizzaName(product.name);
-    setDishCategory(product.category || 'Hamburguesas');
+    setDishCategory(product.category || 'Hot Dogs');
     setPizzaPrice(product.price.toString());
     setPizzaDesc(product.description || '');
     setSelectedBaseIngredients(product.baseIngredients || []);
@@ -115,10 +116,10 @@ export const MenuManagementPage: React.FC = () => {
 
     const productData = {
       name: pizzaName,
-      category: dishCategory || 'Hamburguesas',
+      category: dishCategory || 'Hot Dogs',
       price: pPrice,
-      description: pizzaDesc || 'Deliciosa hamburguesa artesanal Crispy Burger.',
-      image: '/crispy_burger_logo.png',
+      description: pizzaDesc || 'Delicioso hot dog artesanal Mugrosito.',
+      image: '/logo_default.png',
       baseIngredients: selectedBaseIngredients,
       proteinCount: burgerProteinCount,
       defaultProteins: finalDefaultProteins,
@@ -134,7 +135,7 @@ export const MenuManagementPage: React.FC = () => {
 
     setEditingProductId(null);
     setPizzaName('');
-    setDishCategory('Hamburguesas');
+    setDishCategory('Hot Dogs');
     setPizzaPrice('');
     setPizzaDesc('');
     setSelectedBaseIngredients([]);
@@ -185,7 +186,7 @@ export const MenuManagementPage: React.FC = () => {
       drinkType: drinkType,
       price: parseFloat(drinkPrice) || 0,
       description: drinkDesc || 'Bebida bien fría.',
-      image: '/crispy_burger_logo.png',
+      image: '/logo_default.png',
       flavors: finalFlavors,
       recipe: [] as RecipeIngredient[],
       shift: userSession?.shift || 'ambos'
@@ -324,7 +325,7 @@ export const MenuManagementPage: React.FC = () => {
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 p-5 rounded-3xl bg-white border border-yellow-400/50 shadow-md">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-yellow-400 border border-yellow-500 flex items-center justify-center text-2xl shadow-sm">
-            🍔
+            🌭
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -344,7 +345,7 @@ export const MenuManagementPage: React.FC = () => {
               activeTab === 'pizzas' ? 'bg-yellow-400 text-black border border-yellow-500 shadow-xs' : 'text-gray-700 hover:text-black hover:bg-stone-200'
             }`}
           >
-            <span>🍔 HAMBURGUESAS ({pizzas.length})</span>
+            <span>🌭 HOT DOGS ({pizzas.length})</span>
           </button>
 
           <button
@@ -397,20 +398,20 @@ export const MenuManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* TAB 1: HAMBURGUESAS */}
+      {/* TAB 1: HOT DOGS */}
       {activeTab === 'pizzas' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-lg font-black text-black flex items-center gap-2">
-              <span className="text-xl">🍔</span>
-              <span>CATÁLOGO DE HAMBURGUESAS & COMBOS</span>
+              <span className="text-xl">🌭</span>
+              <span>CATÁLOGO DE HOT DOGS & COMBOS</span>
             </h2>
 
             <button
               onClick={() => {
                 setEditingProductId(null);
                 setPizzaName('');
-                setDishCategory('Hamburguesas');
+                setDishCategory('Hot Dogs');
                 setPizzaPrice('');
                 setPizzaDesc('');
                 setSelectedBaseIngredients([]);
@@ -421,7 +422,7 @@ export const MenuManagementPage: React.FC = () => {
               className="px-4 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs transition-all flex items-center gap-1.5 border border-yellow-500 shadow-xs"
             >
               <IoAdd className="text-lg" />
-              <span>NUEVA HAMBURGUESA</span>
+              <span>NUEVO HOT DOG</span>
             </button>
           </div>
 
@@ -432,7 +433,7 @@ export const MenuManagementPage: React.FC = () => {
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-base font-black text-black">{p.name}</h3>
                     <span className="px-2 py-0.5 rounded-md bg-yellow-100 text-black border border-yellow-300 text-[10px] font-black uppercase shrink-0">
-                      {p.category || 'HAMBURGUESA'}
+                      {p.category || 'HOT DOG'}
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">{p.description}</p>
@@ -477,7 +478,7 @@ export const MenuManagementPage: React.FC = () => {
 
                 <div className="flex items-center justify-between pt-3 border-t border-gray-100">
                   <span className="text-lg font-black text-black bg-yellow-400 px-2 py-0.5 rounded border border-yellow-500">
-                    ${p.price.toFixed(2)} USD
+                    {p.price.toLocaleString('es-CO')} COP
                   </span>
                   <div className="flex items-center gap-2">
                     <button
@@ -551,7 +552,7 @@ export const MenuManagementPage: React.FC = () => {
 
                 <div className="flex items-center justify-between pt-3 border-t border-gray-100">
                   <span className="text-lg font-black text-black bg-yellow-400 px-2 py-0.5 rounded border border-yellow-500">
-                    ${p.price.toFixed(2)} USD
+                    {p.price.toLocaleString('es-CO')} COP
                   </span>
                   <div className="flex items-center gap-2">
                     <button
@@ -631,7 +632,7 @@ export const MenuManagementPage: React.FC = () => {
                 <tr>
                   <th className="p-4">Ingrediente / Topping</th>
                   <th className="p-4">Clasificación</th>
-                  <th className="p-4">Precio Adicional (USD)</th>
+                  <th className="p-4">Precio Adicional (COP)</th>
                   <th className="p-4 text-right">Acciones</th>
                 </tr>
               </thead>
@@ -658,32 +659,32 @@ export const MenuManagementPage: React.FC = () => {
                         )}
                         {resolvedType === 'gratis' && (
                           <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-200 text-[11px] font-black inline-flex items-center gap-1">
-                            🆓 GRATUITO / INCLUIDO
-                          </span>
-                        )}
-                        {resolvedType === 'adicional' && (
-                          <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-950 border border-amber-300 text-[11px] font-black inline-flex items-center gap-1">
-                            ➕ ADICIONAL CON COSTO
+                            🆓 GRATUITO (0 COP)
                           </span>
                         )}
                         {resolvedType === 'base' && (
-                          <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 border border-slate-300 text-[11px] font-black inline-flex items-center gap-1">
-                            🥬 INGREDIENTE BASE
+                          <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-800 border border-gray-300 text-[11px] font-black inline-flex items-center gap-1">
+                            🥬 BASE (0 COP)
+                          </span>
+                        )}
+                        {resolvedType === 'adicional' && (
+                          <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 border border-yellow-300 text-[11px] font-black inline-flex items-center gap-1">
+                            ➕ ADICIONAL CON COSTO
                           </span>
                         )}
                       </td>
                       <td className="p-4 font-black">
                         {resolvedType === 'salsa' ? (
                           <span className="text-orange-800 bg-orange-50 px-2 py-0.5 rounded border border-orange-200 font-bold">
-                            $0.00 (No contable)
+                            0 COP (No contable)
                           </span>
                         ) : (resolvedType === 'adicional' || resolvedType === 'proteina') && pUSD > 0 ? (
                           <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                            +${pUSD.toFixed(2)} USD
+                            +{pUSD.toLocaleString('es-CO')} COP
                           </span>
                         ) : (
                           <span className="text-gray-400 font-medium">
-                            $0.00 (Sin Costo)
+                            0 COP (Sin Costo)
                           </span>
                         )}
                       </td>
@@ -1374,14 +1375,14 @@ export const MenuManagementPage: React.FC = () => {
         />
       )}
 
-      {/* MODAL CREAR / EDITAR HAMBURGUESA */}
+      {/* MODAL CREAR / EDITAR HOT DOG */}
       {isAddPizzaOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
           <div className="relative w-full max-w-lg p-6 bg-white border border-yellow-400/50 rounded-3xl shadow-2xl space-y-4 text-black max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div className="flex justify-between items-center pb-3 border-b border-gray-100">
               <h3 className="text-base font-black flex items-center gap-2">
-                <span>🍔</span>
-                <span>{editingProductId ? 'EDITAR HAMBURGUESA' : 'NUEVA HAMBURGUESA EN EL MENÚ'}</span>
+                <span>🌭</span>
+                <span>{editingProductId ? 'EDITAR HOT DOG' : 'NUEVO HOT DOG EN EL MENÚ'}</span>
               </h3>
               <button
                 onClick={() => { setIsAddPizzaOpen(false); setEditingProductId(null); }}
@@ -1393,26 +1394,33 @@ export const MenuManagementPage: React.FC = () => {
 
             <form onSubmit={handleCreatePizza} className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-gray-700 block mb-1">Nombre de la Hamburguesa:</label>
+                <label className="text-xs font-bold text-gray-700 block mb-1">Nombre del Hot Dog / Comida:</label>
                 <input
                   type="text"
                   required
                   value={pizzaName}
                   onChange={(e) => setPizzaName(e.target.value)}
-                  placeholder="Ej: Crispy Clásica, Doble Smash, Chicken Crispy..."
+                  placeholder="Ej: Mugrosito Especial, Perro Caliente Doble, Salchipapa..."
                   className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-gray-300 text-xs text-black outline-none focus:border-yellow-400 font-bold"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-700 block mb-1">Precio en USD ($):</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-gray-700">Precio en Pesos (COP):</label>
+                  {pizzaPrice && Number(pizzaPrice) > 0 && (
+                    <span className="text-[10px] font-black text-gray-500">
+                      ≈ ${(exchangeRates.COP > 0 ? Number(pizzaPrice) / exchangeRates.COP : 0).toFixed(2)} USD
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
-                  step="0.5"
+                  step="500"
                   required
                   value={pizzaPrice}
                   onChange={(e) => setPizzaPrice(e.target.value)}
-                  placeholder="6.50"
+                  placeholder="Ej: 15000"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-gray-300 text-sm text-black outline-none focus:border-yellow-400 font-black"
                 />
               </div>
@@ -1488,7 +1496,7 @@ export const MenuManagementPage: React.FC = () => {
               {/* Selección de Ingredientes Base */}
               <div>
                 <label className="text-xs font-bold text-gray-700 block mb-1">
-                  Ingredientes Base (que vienen con la hamburguesa y se pueden quitar):
+                  Ingredientes Base (que vienen con el hot dog / producto y se pueden quitar):
                 </label>
                 <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto custom-scrollbar p-2.5 bg-stone-50 rounded-xl border border-gray-200">
                   {baseIngredientsAvailable.map((ing) => {
@@ -1520,7 +1528,7 @@ export const MenuManagementPage: React.FC = () => {
                   type="text"
                   value={pizzaDesc}
                   onChange={(e) => setPizzaDesc(e.target.value)}
-                  placeholder="Ej: Pan brioche, salsa especial, queso cheddar y tocineta ahumada"
+                  placeholder="Ej: Pan artesanal, salchicha premium, queso, papitas y salsas especiales"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-gray-300 text-xs text-black outline-none focus:border-yellow-400 font-medium"
                 />
               </div>
@@ -1529,7 +1537,7 @@ export const MenuManagementPage: React.FC = () => {
                 type="submit"
                 className="w-full py-3.5 rounded-2xl bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs border border-yellow-500 shadow-md cursor-pointer transition-all"
               >
-                {editingProductId ? 'ACTUALIZAR HAMBURGUESA' : 'GUARDAR HAMBURGUESA EN EL MENÚ'}
+                {editingProductId ? 'ACTUALIZAR ÍTEM' : 'GUARDAR ÍTEM EN EL MENÚ'}
               </button>
             </form>
           </div>
@@ -1583,14 +1591,21 @@ export const MenuManagementPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-700 block mb-1">Precio en USD ($):</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-gray-700">Precio en Pesos (COP):</label>
+                  {drinkPrice && Number(drinkPrice) > 0 && (
+                    <span className="text-[10px] font-black text-gray-500">
+                      ≈ ${(exchangeRates.COP > 0 ? Number(drinkPrice) / exchangeRates.COP : 0).toFixed(2)} USD
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
-                  step="0.5"
+                  step="500"
                   required
                   value={drinkPrice}
                   onChange={(e) => setDrinkPrice(e.target.value)}
-                  placeholder="1.50"
+                  placeholder="Ej: 5000"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-gray-300 text-sm text-black outline-none focus:border-yellow-400 font-black"
                 />
               </div>
@@ -1715,7 +1730,7 @@ export const MenuManagementPage: React.FC = () => {
                   required
                   value={ingName}
                   onChange={(e) => setIngName(e.target.value)}
-                  placeholder="Ej: Tocineta, Carne Smash, Cebolla Crispy, Lechuga..."
+                  placeholder="Ej: Salchicha, Tocineta, Queso, Papitas, Cebolla..."
                   className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-gray-300 text-xs text-black outline-none focus:border-yellow-400 font-bold"
                 />
               </div>
@@ -1726,10 +1741,10 @@ export const MenuManagementPage: React.FC = () => {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[
                     { type: 'salsa', label: '🥣 Salsa', desc: 'Sección Salsas (cocina, no contable)' },
-                    { type: 'proteina', label: '🥩 Proteína', desc: 'Carne, pollo mechado/crispy' },
+                    { type: 'proteina', label: '🥩 Proteína', desc: 'Salchicha, carne, pollo' },
                     { type: 'gratis', label: '🆓 Gratuito', desc: 'Topping sin costo extra' },
                     { type: 'adicional', label: '➕ Adicional', desc: 'Extra con costo cobrable' },
-                    { type: 'base', label: '🥬 Base', desc: 'Viene por defecto en hamburguesa' },
+                    { type: 'base', label: '🥬 Base', desc: 'Viene por defecto en el producto' },
                   ].map((item) => (
                     <button
                       key={item.type}
@@ -1756,17 +1771,24 @@ export const MenuManagementPage: React.FC = () => {
               {/* Precio USD (Solo si es Adicional o Proteína, o Salsa referencial) */}
               {(ingType === 'adicional' || ingType === 'proteina') ? (
                 <div>
-                  <label className="text-xs font-bold text-gray-700 block mb-1">
-                    Precio Adicional en USD ($):
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-gray-700">
+                      Precio Adicional en Pesos (COP):
+                    </label>
+                    {ingPriceUSD && Number(ingPriceUSD) > 0 && (
+                      <span className="text-[10px] font-black text-gray-500">
+                        ≈ ${(exchangeRates.COP > 0 ? Number(ingPriceUSD) / exchangeRates.COP : 0).toFixed(2)} USD
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="number"
-                    step="0.25"
+                    step="500"
                     min="0"
                     required
                     value={ingPriceUSD}
                     onChange={(e) => setIngPriceUSD(e.target.value)}
-                    placeholder="1.00"
+                    placeholder="Ej: 3000"
                     className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-gray-300 text-sm font-black text-black outline-none focus:border-yellow-400"
                   />
                 </div>

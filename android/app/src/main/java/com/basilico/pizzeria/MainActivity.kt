@@ -39,7 +39,7 @@ class MainActivity : Activity() {
     private lateinit var errorSubtext: TextView
     private lateinit var prefs: SharedPreferences
 
-    private val PREFS_NAME = "CrispyPosPrefs"
+    private val PREFS_NAME = "MugrositoPosPrefs"
     private val KEY_SERVER_IP = "server_ip"
     private val DEFAULT_SERVER_IP = "192.168.10.47:3001"
 
@@ -177,7 +177,7 @@ class MainActivity : Activity() {
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             }
             val originalUa = userAgentString
-            userAgentString = "$originalUa CrispyBurgerTablet/1.0 Kiosk"
+            userAgentString = "$originalUa MugrositoTablet/1.0 Kiosk"
         }
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
     }
@@ -195,7 +195,7 @@ class MainActivity : Activity() {
 
             override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Crispy Burger")
+                    .setTitle("Mugrosito")
                     .setMessage(message ?: "")
                     .setPositiveButton("Aceptar") { _, _ -> result?.confirm() }
                     .setCancelable(false)
@@ -262,7 +262,7 @@ class MainActivity : Activity() {
             setPadding(40, 40, 40, 40)
 
             val titleText = TextView(this@MainActivity).apply {
-                text = "🍔 Crispy Burger POS"
+                text = "🌭 Mugrosito POS"
                 textSize = 28f
                 setTextColor(Color.parseColor("#f59e0b"))
                 setTypeface(null, Typeface.BOLD)
@@ -384,7 +384,7 @@ class MainActivity : Activity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Configurar IP de la PC (Crispy Burger)")
+            .setTitle("Configurar IP de la PC (Mugrosito)")
             .setMessage("Ingresa la dirección IP local de la computadora donde corre el sistema.")
             .setView(container)
             .setPositiveButton("Guardar y Conectar") { _, _ ->
@@ -416,7 +416,7 @@ class MainActivity : Activity() {
             if (backPressedTime + 2000 > System.currentTimeMillis()) {
                 super.onBackPressed()
             } else {
-                Toast.makeText(this, "Presiona de nuevo para salir de Crispy Burger", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Presiona de nuevo para salir de Mugrosito", Toast.LENGTH_SHORT).show()
                 backPressedTime = System.currentTimeMillis()
             }
         }

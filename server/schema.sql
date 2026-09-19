@@ -1,4 +1,4 @@
--- Schema SQL para Crispy POS (PostgreSQL)
+-- Schema SQL para Mugrosito POS (PostgreSQL)
 
 -- 1. Tabla de Usuarios
 CREATE TABLE IF NOT EXISTS users (
@@ -60,8 +60,9 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_status VARCHAR(32) NOT NULL DEFAULT 'no_pagado', -- no_pagado, pagado, credito
   payment_method VARCHAR(32),
   total_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-  cop_rate_at_payment NUMERIC(10, 2) DEFAULT 3950.00,
-  bs_rate_at_payment NUMERIC(10, 2) DEFAULT 36.50,
+  total_cop NUMERIC(12, 2) DEFAULT 0.00,
+  cop_rate_at_payment NUMERIC(10, 2) DEFAULT 3100.00,
+  bs_rate_at_payment NUMERIC(10, 2) DEFAULT 3.20,
   waiter_name VARCHAR(64) DEFAULT 'Mesero',
   kitchen_notes TEXT,
   is_edited BOOLEAN DEFAULT FALSE,
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS orders (
   merged_from_orders TEXT[],
   payment_history_json JSONB,
   delivery_fee_usd NUMERIC(10, 2) DEFAULT 0.00,
+  delivery_fee_cop NUMERIC(12, 2) DEFAULT 0.00,
   notes TEXT,
   debtor_name VARCHAR(128),
   archived_at TIMESTAMP,
@@ -117,8 +119,8 @@ CREATE TABLE IF NOT EXISTS order_payments (
   change_given_cop NUMERIC(12, 2) DEFAULT 0.00,
   change_given_bs NUMERIC(12, 2) DEFAULT 0.00,
   item_ids TEXT[],
-  cop_rate NUMERIC(10, 2) DEFAULT 3950.00,
-  bs_rate NUMERIC(10, 2) DEFAULT 36.50,
+  cop_rate NUMERIC(10, 2) DEFAULT 3100.00,
+  bs_rate NUMERIC(10, 2) DEFAULT 3.20,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -167,8 +169,8 @@ CREATE TABLE IF NOT EXISTS caja_chica_cierres (
 -- 11. Tasas de Cambio
 CREATE TABLE IF NOT EXISTS exchange_rates (
   id INT PRIMARY KEY DEFAULT 1,
-  cop_rate NUMERIC(10, 2) NOT NULL DEFAULT 3950.00,
-  bs_rate NUMERIC(10, 2) NOT NULL DEFAULT 36.50
+  cop_rate NUMERIC(10, 2) NOT NULL DEFAULT 3100.00,
+  bs_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.20
 );
 
 CREATE TABLE IF NOT EXISTS shift_exchange_rates (
@@ -206,17 +208,17 @@ CREATE INDEX IF NOT EXISTS idx_caja_tx_timestamp ON caja_chica_transactions(time
 CREATE INDEX IF NOT EXISTS idx_caja_tx_cierre_id ON caja_chica_transactions(cierre_id);
 
 -- Inserción Inicial de Tasas y PIN
-INSERT INTO exchange_rates (id, cop_rate, bs_rate) VALUES (1, 3950.00, 36.50) ON CONFLICT (id) DO NOTHING;
-INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('ambos', 3950.00, 36.50, 'Inicial') ON CONFLICT (shift) DO NOTHING;
+INSERT INTO exchange_rates (id, cop_rate, bs_rate) VALUES (1, 3100.00, 3.20) ON CONFLICT (id) DO NOTHING;
+INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('ambos', 3100.00, 3.20, 'Inicial Mugrosito') ON CONFLICT (shift) DO NOTHING;
 INSERT INTO system_settings (key, value) VALUES ('admin_pin', '1234') ON CONFLICT (key) DO NOTHING;
 
--- Inserción Inicial de Usuarios Crispy
+-- Inserción Inicial de Usuarios Mugrosito
 INSERT INTO users (id, username, password, role, name, shift) VALUES
-('u-admin', 'carlos', 'carloscrispys', 'admin', 'Carlos', 'ambos'),
-('u-caja', 'cajeroa', 'cajero', 'caja', 'Cajero Principal', 'ambos'),
+('u-admin', 'linda', 'lindamugrosito', 'admin', 'Linda', 'ambos'),
+('u-caja', 'cajero', 'cajero', 'caja', 'Cajero', 'ambos'),
 ('u-mesero', 'mesero', 'mesero', 'mesero', 'Mesero Principal', 'ambos'),
 ('u-cocina', 'cocina', 'cocina', 'cocina', 'Jefe de Cocina', 'ambos')
-ON CONFLICT (username) DO NOTHING;
+ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password;
 
 -- Inserción Inicial de Mesas
 INSERT INTO tables_config (id, number, name, capacity, status, zone) VALUES

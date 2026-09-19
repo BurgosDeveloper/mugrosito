@@ -1,7 +1,6 @@
 import React from 'react';
 import { OrderItem } from '../../data/mockData';
 import { DeliveryFeeSelector } from '../../components/DeliveryFeeSelector';
-import { roundCOP } from '../../utils/currencyRounding';
 import {
   IoCheckmarkCircle,
   IoArrowBack,
@@ -33,12 +32,12 @@ export const DeliveryConfigPanel: React.FC<DeliveryConfigPanelProps> = ({
   cartItems,
   onSetItemPackaging,
   onSetAllDelivery,
-  exchangeRates = { COP: 3950, Bs: 36.5 },
+  exchangeRates = { COP: 3100, Bs: 3.2 },
   onClose,
   onClearAllDelivery,
 }) => {
-  const copRate = exchangeRates?.COP || 3950;
-  const bsRate = exchangeRates?.Bs || 36.5;
+  const copRate = exchangeRates?.COP || 3100;
+  const bsRate = exchangeRates?.Bs || 3.2;
 
   const deliveryItemsCount = cartItems.filter((i) => i.isDelivery).length;
   const totalItemsCount = cartItems.reduce((acc, i) => acc + i.quantity, 0);
@@ -190,7 +189,7 @@ export const DeliveryConfigPanel: React.FC<DeliveryConfigPanelProps> = ({
                         </span>
                       </div>
                       <div className="text-[11px] font-bold text-gray-500 mt-0.5">
-                        ${(item.price * item.quantity).toFixed(2)} USD
+                        {Math.round(item.price * item.quantity).toLocaleString('es-CO')} COP
                         {item.flavor && <span className="text-amber-700 ml-1.5">• {item.flavor}</span>}
                       </div>
                     </div>
@@ -251,17 +250,17 @@ export const DeliveryConfigPanel: React.FC<DeliveryConfigPanelProps> = ({
           </span>
           <div className="flex items-baseline gap-2.5 flex-wrap">
             <span className="text-xl sm:text-2xl font-black text-black">
-              ${grandTotalUSD.toFixed(2)} <span className="text-xs sm:text-sm font-bold text-gray-500">USD</span>
+              {grandTotalUSD.toLocaleString('es-CO')} <span className="text-xs sm:text-sm font-bold text-gray-500">COP</span>
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇨🇴 {roundCOP(grandTotalUSD * copRate).toLocaleString()} COP
+              💵 ${(copRate > 0 ? grandTotalUSD / copRate : 0).toFixed(2)} USD
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇻🇪 {(grandTotalUSD * bsRate).toFixed(2)} Bs
+              🇻🇪 {(bsRate > 0 ? grandTotalUSD / bsRate : 0).toFixed(2)} Bs
             </span>
             {deliveryItemsCount > 0 && (
               <span className="text-xs font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200 ml-1">
-                (Incluye ${deliveryFeeUSD.toFixed(2)} de envío)
+                (Incluye {deliveryFeeUSD.toLocaleString('es-CO')} COP de envío)
               </span>
             )}
           </div>

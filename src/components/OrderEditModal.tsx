@@ -9,14 +9,17 @@ interface OrderEditModalProps {
   onClose: () => void;
   products: Product[];
   ingredients: Ingredient[];
+  exchangeRates?: { COP: number; Bs: number };
   onSaveEdit: (orderId: string, payload: {
     items: OrderItem[];
     kitchenNotes?: string;
     totalUSD: number;
+    totalCOP?: number;
     customerName?: string;
     tableNumber?: number;
     type?: 'mesa' | 'llevar' | 'delivery' | 'pickup' | 'credito';
     deliveryFeeUSD?: number;
+    deliveryFeeCOP?: number;
   }) => Promise<void>;
   onDeletePaymentEntry?: (orderId: string, paymentId: string) => Promise<Order>;
   onDeleteOrder?: (orderId: string) => Promise<void>;
@@ -28,6 +31,7 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
   onClose,
   products,
   ingredients,
+  exchangeRates = { COP: 3100, Bs: 3.2 },
   onSaveEdit,
   onDeletePaymentEntry,
   onDeleteOrder,
@@ -52,14 +56,17 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
       setCustomerName(order.customerName || '');
       setTableNumber(order.tableNumber || '');
       setType(order.type || 'mesa');
-      setKitchenNotes(order.kitchenNotes || '');
-      setDeliveryFeeUSD(order.deliveryFeeUSD || 0);
+      const copR = exchangeRates?.COP || 3100;
+      const initialFeeCOP = order.deliveryFeeCOP !== undefined && order.deliveryFeeCOP !== null
+        ? Number(order.deliveryFeeCOP)
+        : (order.deliveryFeeUSD && copR > 0 ? Math.round(Number(order.deliveryFeeUSD) * copR) : 0);
+      setDeliveryFeeUSD(initialFeeCOP);
       setItems(JSON.parse(JSON.stringify(order.items || [])));
       setPaymentHistory(order.paymentHistory ? [...order.paymentHistory] : []);
       setExpandedItemId(null);
       setError('');
     }
-  }, [order]);
+  }, [order, exchangeRates?.COP]);
 
   if (!isOpen || !order) return null;
 
@@ -95,7 +102,11 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
       return Math.max(2.0, effectiveBasePrice + extrasTotal);
     }
 
-    return prod.price;
+    const extrasTotal = (item.extras || []).reduce((sum, e) => sum + (e.price || 0) * (e.quantity || 1), 0);
+    if (extrasTotal > 0) {
+      return (prod.price || 0) + extrasTotal;
+    }
+    return item.price || prod.price || 0;
   };
 
   const calculateTotal = (currentItems: OrderItem[]) => {
@@ -175,15 +186,21 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
     }
     try {
       setIsSubmitting(true);
-      const totalUSD = calculateTotal(items);
+      const totalCOP = calculateTotal(items);
+      const copRate = exchangeRates?.COP || 3100;
+      const totalUSD = copRate > 0 ? totalCOP / copRate : 0;
+      const deliveryFeeCOP = type === 'delivery' ? (parseFloat(String(deliveryFeeUSD)) || 0) : 0;
+      const deliveryFeeUSDCalc = copRate > 0 ? deliveryFeeCOP / copRate : 0;
       await onSaveEdit(order.id, {
         items,
         kitchenNotes,
         totalUSD,
+        totalCOP,
         customerName,
         tableNumber: tableNumber ? Number(tableNumber) : undefined,
         type: type === 'llevar' ? 'pickup' : type,
-        deliveryFeeUSD: type === 'delivery' ? (parseFloat(String(deliveryFeeUSD)) || 0) : 0,
+        deliveryFeeUSD: deliveryFeeUSDCalc,
+        deliveryFeeCOP,
       });
       onClose();
     } catch (e) {
@@ -260,13 +277,13 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
             </div>
             {type === 'delivery' && (
               <div>
-                <label className="block text-[11px] font-black text-emerald-400 uppercase mb-1">Costo Delivery ($ USD)</label>
+                <label className="block text-[11px] font-black text-emerald-400 uppercase mb-1">Costo Delivery (COP)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="500"
                   value={deliveryFeeUSD}
                   onChange={(e) => setDeliveryFeeUSD(e.target.value ? parseFloat(e.target.value) : '')}
-                  placeholder="0.00"
+                  placeholder="2000"
                   className="w-full px-3 py-2 rounded-xl border border-emerald-500/50 bg-emerald-900/20 font-bold text-sm text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
@@ -278,7 +295,7 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Modificar Productos del Pedido</h4>
               <span className="text-xs font-bold text-emerald-300 bg-emerald-900/40 px-2.5 py-1 rounded-full border border-emerald-500/30">
-                Nuevo Total Calculado: ${currentTotal.toFixed(2)} USD
+                Nuevo Total: {Math.round(currentTotal).toLocaleString('es-CO')} COP (~ ${(exchangeRates.COP > 0 ? currentTotal / exchangeRates.COP : 0).toFixed(2)} USD)
               </span>
             </div>
 
@@ -300,7 +317,7 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
                             {item.productName} {item.isTakeaway && <span className="text-amber-400 ml-1">(📦 LLEVAR)</span>}
                           </div>
                           <div className="text-xs text-slate-400">
-                            ${(item.price || 0).toFixed(2)} c/u
+                            {Math.round(item.price || 0).toLocaleString('es-CO')} COP c/u
                           </div>
                         </div>
                       </div>
@@ -512,7 +529,7 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
                                             hasExtra ? 'bg-emerald-900/50 border-emerald-500 text-emerald-400' : 'bg-[#1e293b] border-slate-600 text-slate-300 hover:bg-slate-700'
                                           }`}
                                         >
-                                          {ext.name} (+${extraPrice.toFixed(2)})
+                                          {ext.name} (+{Math.round(extraPrice).toLocaleString('es-CO')} COP)
                                         </button>
                                       );
                                     })}

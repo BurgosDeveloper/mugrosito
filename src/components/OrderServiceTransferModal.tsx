@@ -380,7 +380,11 @@ export const OrderServiceTransferModal: React.FC<OrderServiceTransferModalProps>
                             />
                             <span className="text-xs">{it.quantity}x {it.productName}</span>
                           </div>
-                          <span className="text-xs font-bold text-gray-700">${(it.price * it.quantity).toFixed(2)}</span>
+                          <span className="text-xs font-bold text-gray-700">
+                            {it.price >= 100
+                              ? `${Math.round(it.price * it.quantity).toLocaleString('es-CO')} COP`
+                              : `$${(it.price * it.quantity).toFixed(2)}`}
+                          </span>
                         </label>
                       );
                     })}

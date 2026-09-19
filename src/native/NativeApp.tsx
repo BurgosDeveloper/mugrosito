@@ -253,10 +253,10 @@ export function NativeApp() {
 
             <View style={styles.ratesBox}>
               <Text style={styles.ratesTitle}>Tasas del Día:</Text>
-              <Text style={styles.ratesText}>1 USD = $3,950 COP | 36.50 Bs.</Text>
+              <Text style={styles.ratesText}>1 USD = $3,100 COP | 1 Bs = 3.20 COP</Text>
             </View>
 
-            <Text style={styles.drawerFooter}>BASILICO PIZZERIA • EXPO NATIVE APP</Text>
+            <Text style={styles.drawerFooter}>MUGROSITO • POS RESTAURANTE</Text>
           </SafeAreaView>
         </View>
       </Modal>

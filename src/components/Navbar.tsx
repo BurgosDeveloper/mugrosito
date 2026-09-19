@@ -37,7 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       case '/cocina':
         return { label: 'COCINA KDS', icon: <IoFlame className="text-amber-500 text-sm" /> };
       default:
-        return { label: 'CRISPY BURGER', icon: <IoFastFood className="text-yellow-600 text-sm" /> };
+        return { label: 'MUGROSITO', icon: <IoFastFood className="text-yellow-600 text-sm" /> };
     }
   };
 
@@ -61,15 +61,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <Link to="/" className="flex items-center gap-2 group">
             <div className="w-9 h-9 rounded-xl bg-yellow-400 border border-yellow-500 p-0.5 flex items-center justify-center shadow-sm group-hover:scale-105 transition-all overflow-hidden">
-              <img src="/logo_default.png" alt="Crispy Burger" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }} />
+              <img src="/logo_default.png" alt="Mugrosito" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }} />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-black text-base tracking-tight text-black group-hover:text-yellow-600 transition-colors">
-                  CRISPY
+                  MUGROSITO
                 </span>
                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-400 text-black border border-yellow-500 uppercase">
-                  BURGER
+                  POS
                 </span>
               </div>
             </div>

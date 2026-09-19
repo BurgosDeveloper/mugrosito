@@ -1,5 +1,5 @@
 /**
- * Redondeo Comercial Contable para Crispy Burger POS (Tarea 13)
+ * Redondeo Comercial Contable para Mugrosito POS (Tarea 13)
  *
  * Reglas de Moneda:
  * - COP (Pesos Colombianos): En operaciones comerciales en efectivo no se manejan fracciones inferiores a mil pesos.
@@ -8,9 +8,21 @@
  * - USD (Dólares Estadounidenses): Se calculan y redondean con 2 decimales.
  */
 
+export function roundCOPPayment(amountCOP: number): number {
+  const num = Math.round(Number(amountCOP) * 100) / 100;
+  if (!num || num <= 0 || isNaN(num)) return 0;
+  const thousands = Math.floor(num / 1000) * 1000;
+  const remainder = num - thousands;
+
+  // Tolerancia de 10 COP en los múltiplos de 1000 para absorber ruido de conversión a 2 decimales en USD (ej. 42005 -> 42000)
+  if (remainder <= 10) return thousands;
+  if (remainder >= 990) return thousands + 1000;
+  if (remainder <= 500) return thousands + 500;
+  return thousands + 1000;
+}
+
 export function roundCOP(amountCOP: number): number {
-  if (!amountCOP || amountCOP <= 0 || isNaN(amountCOP)) return 0;
-  return Math.ceil(amountCOP / 1000) * 1000;
+  return roundCOPPayment(amountCOP);
 }
 
 export function roundBs(amountBs: number): number {
@@ -24,7 +36,8 @@ export function roundUSD(amountUSD: number): number {
 }
 
 export function formatCOP(amountCOP: number): string {
-  return roundCOP(amountCOP).toLocaleString('es-CO');
+  const rounded = roundCOP(amountCOP);
+  return rounded.toLocaleString('es-CO');
 }
 
 export function formatBs(amountBs: number): string {

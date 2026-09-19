@@ -33,7 +33,7 @@ export function isPotatoProduct(product: Product | null | undefined): boolean {
 }
 
 /**
- * Determina si un producto es comida personalizable (hamburguesas, platos especiales)
+ * Determina si un producto es comida personalizable (hot dogs, hamburguesas, platos especiales)
  * que debe abrir el configurador (BurgerBuilderModal) para elegir carnes, salsas, etc.
  */
 export function isCustomizableProduct(product: Product | null | undefined): boolean {
@@ -46,8 +46,8 @@ export function isCustomizableProduct(product: Product | null | undefined): bool
   const cat = (product.category || '').toLowerCase().trim();
   const name = (product.name || '').toLowerCase().trim();
 
-  // Si es hamburguesa o plato
-  if (cat.includes('hamburguesa') || cat.includes('plato')) {
+  // Si es hot dog, hamburguesa o plato
+  if (cat.includes('hamburguesa') || cat.includes('hot dog') || cat.includes('perro') || cat.includes('mugrosito') || cat.includes('plato')) {
     return true;
   }
 
@@ -56,7 +56,7 @@ export function isCustomizableProduct(product: Product | null | undefined): bool
     return true;
   }
 
-  return /burger|hamburguesa|smash|tasty|mixtura/i.test(name);
+  return /burger|hamburguesa|smash|tasty|mixtura|hot\s*dog|perro|mugrosito/i.test(name);
 }
 
 /**

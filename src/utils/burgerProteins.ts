@@ -1,5 +1,6 @@
 export function normalizeProteinName(name: string = ''): string {
   const n = String(name || '').trim().toLowerCase();
+  if (n.includes('salchicha') || n.includes('perro') || n.includes('hot dog')) return 'salchicha';
   if (n.includes('mechada') || n.includes('street')) return 'carne mechada';
   if (n.includes('smash')) return 'smash';
   if (n.includes('chuleta') || n.includes('pork') || n.includes('cerdo')) return 'chuleta de cerdo ahumada';
@@ -36,11 +37,12 @@ export function getCleanItemNote(rawNotes?: string | null): string {
 
 export function getProteinIcon(name: string = ''): string {
   const n = String(name || '').toLowerCase().trim();
+  if (n.includes('salchicha') || n.includes('perro') || n.includes('hot dog')) return '🌭';
   if (n.includes('pollo') || n.includes('crispy')) return '🍗';
   if (n.includes('plancha') || n.includes('pechuga') || n.includes('grill')) return '🍳';
   if (n.includes('chuleta') || n.includes('pork') || n.includes('cerdo')) return '🥓';
   if (n.includes('mechada') || n.includes('street')) return '🍲';
-  if (n.includes('smash')) return '🍔';
+  if (n.includes('smash')) return '🥩';
   if (n.includes('novillo') || n.includes('carne') || n.includes('res') || n.includes('bife') || n.includes('angus')) return '🥩';
   return '🥩';
 }
@@ -95,7 +97,10 @@ export function areProteinsDefault(burgerName: string, proteins?: string[], defa
     return pSorted.length === 2 && pSorted.every((p) => p === 'carne de novillo');
   }
 
-  // 6. Hamburguesas individuales de 1 carne
+  // 6. Productos individuales de 1 proteína
+  if (nameLower.includes('mugrosito') || nameLower.includes('perro') || nameLower.includes('hot dog')) {
+    return pSorted.length === 1 && pSorted[0] === 'salchicha';
+  }
   if (nameLower.includes('mr pork') || nameLower.includes('pork')) {
     return pSorted.length === 1 && pSorted[0] === 'chuleta de cerdo ahumada';
   }
@@ -112,8 +117,8 @@ export function areProteinsDefault(burgerName: string, proteins?: string[], defa
     return pSorted.length === 1 && pSorted[0] === 'carne de novillo';
   }
 
-  // Default general: 1 carne de novillo
-  return pSorted.length === 1 && pSorted[0] === 'carne de novillo';
+  // Default general: 1 proteína (salchicha o carne)
+  return pSorted.length === 1 && (pSorted[0] === 'salchicha' || pSorted[0] === 'carne de novillo');
 }
 
 export function formatRemovedIngredients(removed?: string[]): string[] {

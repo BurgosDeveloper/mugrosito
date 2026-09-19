@@ -52,7 +52,7 @@ public class RawPrinter {
         Int32 dwWritten = 0;
         IntPtr hPrinter = IntPtr.Zero;
         DOCINFOA di = new DOCINFOA();
-        di.pDocName = "Crispy POS Ticket";
+        di.pDocName = "Mugrosito POS Ticket";
         di.pDataType = "RAW";
 
         if (!OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {

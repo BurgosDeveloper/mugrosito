@@ -58,17 +58,19 @@ module.exports = function(io) {
   router.post('/', requireRole('mesero', 'caja', 'admin'), async (req, res) => {
     let client;
     try {
-      const { type, tableNumber, customerName, kitchenNotes, items, totalUSD, deliveryFeeUSD, targetPrinter } = req.body;
+      const { type, tableNumber, customerName, kitchenNotes, items, totalUSD, deliveryFeeUSD, totalCOP, deliveryFeeCOP, targetPrinter } = req.body;
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'La comanda debe incluir al menos un ítem.' });
       }
+
+      const rawDeliveryCOP = Number(deliveryFeeCOP !== undefined ? deliveryFeeCOP : (deliveryFeeUSD || 0));
 
       if (type === 'delivery') {
         if (!customerName || !customerName.trim()) {
           return res.status(400).json({ error: 'Para órdenes Delivery es obligatorio ingresar el nombre del cliente.' });
         }
-        if (!deliveryFeeUSD || Number(deliveryFeeUSD) <= 0) {
-          return res.status(400).json({ error: 'Para órdenes Delivery es obligatorio ingresar el monto del servicio de delivery mayor a $0.' });
+        if (rawDeliveryCOP <= 0) {
+          return res.status(400).json({ error: 'Para órdenes Delivery es obligatorio ingresar el monto del servicio de delivery mayor a 0 COP.' });
         }
       }
 
@@ -98,12 +100,21 @@ module.exports = function(io) {
       const requiresKitchen = isPickupOrDelivery || (items || []).some(it => isKitchenItem(it));
       const initialStatus = requiresKitchen ? 'en_preparacion' : 'preparada';
 
-      console.log(`📝 [COMANDA RECIBIDA] ${orderNumber} (${(type || 'mesa').toUpperCase()}) | Cliente: ${customerName || 'N/A'} | Items: ${items?.length || 0} | Total: $${totalUSD} | Requiere Cocina: ${requiresKitchen}`);
+      const ratesRes = await client.query(`SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = 'ambos' LIMIT 1`);
+      const currentCopRate = Number(ratesRes.rows[0]?.cop_rate || 3100);
+      const currentBsRate = Number(ratesRes.rows[0]?.bs_rate || 3.2);
+
+      const computedTotalCOP = Number(totalCOP !== undefined ? totalCOP : (totalUSD || 0));
+      const computedTotalUSD = currentCopRate > 0 ? Number((computedTotalCOP / currentCopRate).toFixed(2)) : computedTotalCOP;
+      const computedDeliveryCOP = rawDeliveryCOP;
+      const computedDeliveryUSD = currentCopRate > 0 ? Number((computedDeliveryCOP / currentCopRate).toFixed(2)) : computedDeliveryCOP;
+
+      console.log(`📝 [COMANDA RECIBIDA] ${orderNumber} (${(type || 'mesa').toUpperCase()}) | Cliente: ${customerName || 'N/A'} | Items: ${items?.length || 0} | Total: ${computedTotalCOP.toLocaleString('es-CO')} COP ($${computedTotalUSD} USD) | Requiere Cocina: ${requiresKitchen}`);
 
       await client.query(
-        `INSERT INTO orders (id, order_number, type, table_number, customer_name, kitchen_notes, status, payment_status, total_usd, waiter_name, shift, delivery_fee_usd)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'no_pagado', $8, 'Mesero', 'ambos', $9)`,
-        [orderId, orderNumber, type || 'mesa', tableNumber || null, customerName || null, kitchenNotes || null, initialStatus, totalUSD || 0, deliveryFeeUSD || 0]
+        `INSERT INTO orders (id, order_number, type, table_number, customer_name, kitchen_notes, status, payment_status, total_usd, total_cop, waiter_name, shift, delivery_fee_usd, delivery_fee_cop, cop_rate_at_payment, bs_rate_at_payment)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'no_pagado', $8, $9, 'Mesero', 'ambos', $10, $11, $12, $13)`,
+        [orderId, orderNumber, type || 'mesa', tableNumber || null, customerName || null, kitchenNotes || null, initialStatus, computedTotalUSD, computedTotalCOP, computedDeliveryUSD, computedDeliveryCOP, currentCopRate, currentBsRate]
       );
 
       for (const item of items) {
@@ -405,19 +416,48 @@ module.exports = function(io) {
         }
       }
 
+      const ratesRes = await client.query(`SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = 'ambos' LIMIT 1`);
+      const currentCopRate = Number(ratesRes.rows[0]?.cop_rate || 3100);
+
+      let computedTotalCOP = req.body.totalCOP;
+      let computedTotalUSD = totalUSD;
+      let computedDeliveryCOP = req.body.deliveryFeeCOP;
+      let computedDeliveryUSD = deliveryFeeUSD;
+
+      if (items && Array.isArray(items)) {
+        const itemsTotalCOP = items.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+        let delivCOP = 0;
+        if (computedDeliveryCOP !== undefined && Number(computedDeliveryCOP) >= 0) {
+          delivCOP = Number(computedDeliveryCOP);
+        } else if (computedDeliveryUSD !== undefined && Number(computedDeliveryUSD) > 0) {
+          delivCOP = Number(computedDeliveryUSD) >= 100 ? Number(computedDeliveryUSD) : Math.round(Number(computedDeliveryUSD) * currentCopRate);
+        }
+        computedTotalCOP = Math.round(itemsTotalCOP + delivCOP);
+        computedTotalUSD = currentCopRate > 0 ? Number((computedTotalCOP / currentCopRate).toFixed(2)) : computedTotalCOP;
+        computedDeliveryCOP = delivCOP;
+        computedDeliveryUSD = currentCopRate > 0 ? Number((delivCOP / currentCopRate).toFixed(2)) : delivCOP;
+      } else if (computedTotalCOP !== undefined && currentCopRate > 0) {
+        computedTotalUSD = Number((Number(computedTotalCOP) / currentCopRate).toFixed(2));
+      } else if (computedTotalUSD !== undefined && computedTotalUSD > 500) {
+        computedTotalCOP = Number(computedTotalUSD);
+        computedTotalUSD = currentCopRate > 0 ? Number((computedTotalCOP / currentCopRate).toFixed(2)) : computedTotalCOP;
+      }
+
       await client.query(
         `UPDATE orders SET 
            kitchen_notes = COALESCE($1, kitchen_notes), 
            total_usd = COALESCE($2, total_usd), 
-           delivery_fee_usd = COALESCE($3, delivery_fee_usd),
-           customer_name = COALESCE($4, customer_name),
-           table_number = COALESCE($5, table_number),
-           type = COALESCE($6, type),
-           payment_status = COALESCE($7, payment_status),
+           total_cop = COALESCE($3, total_cop),
+           delivery_fee_usd = COALESCE($4, delivery_fee_usd),
+           delivery_fee_cop = COALESCE($5, delivery_fee_cop),
+           customer_name = COALESCE($6, customer_name),
+           table_number = COALESCE($7, table_number),
+           type = COALESCE($8, type),
+           payment_status = COALESCE($9, payment_status),
            is_edited = true, 
            updated_at = CURRENT_TIMESTAMP 
-         WHERE id = $8`,
-        [kitchenNotes ?? null, totalUSD ?? null, deliveryFeeUSD ?? null, customerName ?? null, tableNumber ?? null, type ?? null, paymentStatus ?? null, id]
+         WHERE id = $10`,
+        [kitchenNotes ?? null, computedTotalUSD ?? null, computedTotalCOP ?? null, computedDeliveryUSD ?? null, computedDeliveryCOP ?? null, customerName ?? null, tableNumber ?? null, type ?? null, paymentStatus ?? null, id]
       );
 
       if (items && Array.isArray(items)) {
@@ -613,16 +653,28 @@ module.exports = function(io) {
       await query(`UPDATE order_payments SET order_id = $1 WHERE order_id = ANY($2::text[])`, [targetOrderId, sourceOrderIds]);
       await query(`UPDATE order_items SET order_id = $1 WHERE order_id = ANY($2::text[])`, [targetOrderId, sourceOrderIds]);
 
+      const { rows: ratesRows } = await query(`SELECT cop_rate FROM shift_exchange_rates WHERE shift = 'ambos' LIMIT 1`);
+      const currentCopRate = Number(ratesRows[0]?.cop_rate || 3100);
+
       const { rows: allTargetItems } = await query(`SELECT price, quantity FROM order_items WHERE order_id = $1`, [targetOrderId]);
-      let newTotalUSD = 0;
+      let itemsTotalCOP = 0;
       for (const it of allTargetItems) {
         const itemPrice = parseFloat(it.price || 0);
         const qty = parseInt(it.quantity) || 1;
-        newTotalUSD += itemPrice * qty;
+        itemsTotalCOP += itemPrice * qty;
       }
 
-      const totalDeliveryFeeUSD = allInvolved.reduce((sum, o) => sum + (parseFloat(o.deliveryFeeUSD || o.delivery_fee_usd) || 0), 0);
-      newTotalUSD += totalDeliveryFeeUSD;
+      const totalDeliveryFeeCOP = allInvolved.reduce((sum, o) => {
+        const dCop = parseFloat(o.deliveryFeeCOP || o.delivery_fee_cop || 0);
+        const dUsd = parseFloat(o.deliveryFeeUSD || o.delivery_fee_usd || 0);
+        if (dCop > 0) return sum + dCop;
+        if (dUsd >= 100) return sum + dUsd;
+        return sum + Math.round(dUsd * currentCopRate);
+      }, 0);
+
+      const newTotalCOP = Math.round(itemsTotalCOP + totalDeliveryFeeCOP);
+      const newTotalUSD = currentCopRate > 0 ? Number((newTotalCOP / currentCopRate).toFixed(2)) : newTotalCOP;
+      const totalDeliveryFeeUSD = currentCopRate > 0 ? Number((totalDeliveryFeeCOP / currentCopRate).toFixed(2)) : totalDeliveryFeeCOP;
 
       const { rows: sumPayments } = await query(`SELECT COALESCE(SUM(amount_paid_usd), 0) as paid FROM order_payments WHERE order_id = $1`, [targetOrderId]);
       const newPaidUSD = parseFloat(sumPayments[0]?.paid || 0);
@@ -630,8 +682,8 @@ module.exports = function(io) {
 
       const updatedNotes = `${targetOrder.kitchenNotes || ''} (Fusionada con comandas ${sourceNumbers})`.trim();
       await query(
-        `UPDATE orders SET total_usd = $1, paid_amount_usd = $2, payment_status = $3, kitchen_notes = $4, merged_from_orders = $5, delivery_fee_usd = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7`,
-        [newTotalUSD, newPaidUSD, newPaymentStatus, updatedNotes, sourceOrders.map((o) => o.orderNumber), totalDeliveryFeeUSD, targetOrderId]
+        `UPDATE orders SET total_usd = $1, total_cop = $2, paid_amount_usd = $3, payment_status = $4, kitchen_notes = $5, merged_from_orders = $6, delivery_fee_usd = $7, delivery_fee_cop = $8, updated_at = CURRENT_TIMESTAMP WHERE id = $9`,
+        [newTotalUSD, newTotalCOP, newPaidUSD, newPaymentStatus, updatedNotes, sourceOrders.map((o) => o.orderNumber), totalDeliveryFeeUSD, totalDeliveryFeeCOP, targetOrderId]
       );
 
       await query(
@@ -785,17 +837,20 @@ module.exports = function(io) {
 
       const oldTableNumber = order.table_number;
 
+      const { rows: ratesRows } = await client.query(`SELECT cop_rate FROM shift_exchange_rates WHERE shift = 'ambos' LIMIT 1`);
+      const currentCopRate = Number(ratesRows[0]?.cop_rate || 3100);
+
       // Obtener subtotal real de los ítems actuales
       const { rows: itemsRows } = await client.query(
         'SELECT price, quantity FROM order_items WHERE order_id = $1',
         [id]
       );
-      let itemsSubtotal = 0;
+      let itemsSubtotalCOP = 0;
       for (const it of itemsRows) {
         const p = Number(it.price) || 0;
-        itemsSubtotal += p * (Number(it.quantity) || 1);
+        itemsSubtotalCOP += p * (Number(it.quantity) || 1);
       }
-      itemsSubtotal = Number(itemsSubtotal.toFixed(2));
+      itemsSubtotalCOP = Math.round(itemsSubtotalCOP);
 
       if (action === 'change-table' || action === 'to-mesa') {
         const parsedTable = parseInt(newTableNumber, 10);
@@ -808,18 +863,25 @@ module.exports = function(io) {
           return res.status(400).json({ error: 'La comanda ya está en esa mesa.' });
         }
 
-        // Mantener delivery_fee_usd si la comanda tiene ítems marcados para delivery, de lo contrario 0
+        // Mantener delivery_fee si la comanda tiene ítems marcados para delivery, de lo contrario 0
         const { rows: delItemRows } = await client.query(
           'SELECT COUNT(*) as count FROM order_items WHERE order_id = $1 AND is_delivery = true',
           [id]
         );
         const hasDeliveryItems = Number(delItemRows[0]?.count || 0) > 0;
-        const currentFee = hasDeliveryItems ? (Number(order.delivery_fee_usd) || 0) : 0;
-        const newTotal = Number((itemsSubtotal + currentFee).toFixed(2));
+        let currentFeeCOP = 0;
+        if (hasDeliveryItems) {
+          const rawDelCOP = Number(order.delivery_fee_cop) || 0;
+          const rawDelUSD = Number(order.delivery_fee_usd) || 0;
+          currentFeeCOP = rawDelCOP > 0 ? rawDelCOP : (rawDelUSD >= 100 ? rawDelUSD : Math.round(rawDelUSD * currentCopRate));
+        }
+        const newTotalCOP = itemsSubtotalCOP + currentFeeCOP;
+        const newTotalUSD = currentCopRate > 0 ? Number((newTotalCOP / currentCopRate).toFixed(2)) : newTotalCOP;
+        const currentFeeUSD = currentCopRate > 0 ? Number((currentFeeCOP / currentCopRate).toFixed(2)) : currentFeeCOP;
 
         await client.query(
-          `UPDATE orders SET type = 'mesa', table_number = $1, delivery_fee_usd = $2, total_usd = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4`,
-          [parsedTable, currentFee, newTotal, id]
+          `UPDATE orders SET type = 'mesa', table_number = $1, delivery_fee_usd = $2, delivery_fee_cop = $3, total_usd = $4, total_cop = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6`,
+          [parsedTable, currentFeeUSD, currentFeeCOP, newTotalUSD, newTotalCOP, id]
         );
 
         await client.query("UPDATE tables_config SET status = 'ocupada' WHERE number = $1", [parsedTable]);
@@ -834,13 +896,17 @@ module.exports = function(io) {
           }
         }
       } else if (action === 'to-delivery') {
-        const fee = deliveryFeeUSD !== undefined ? Number(deliveryFeeUSD) : (Number(order.delivery_fee_usd) || 0);
+        let rawFee = deliveryFeeUSD !== undefined ? Number(deliveryFeeUSD) : (Number(order.delivery_fee_cop) || Number(order.delivery_fee_usd) || 2000);
+        let feeCOP = rawFee >= 100 ? rawFee : Math.round(rawFee * currentCopRate);
+        if (feeCOP <= 0) feeCOP = 2000;
+        let feeUSD = currentCopRate > 0 ? Number((feeCOP / currentCopRate).toFixed(2)) : feeCOP;
         const finalCustName = customerName ? customerName.trim() : (order.customer_name || 'Cliente Delivery');
-        const newTotal = Number((itemsSubtotal + fee).toFixed(2));
+        const newTotalCOP = itemsSubtotalCOP + feeCOP;
+        const newTotalUSD = currentCopRate > 0 ? Number((newTotalCOP / currentCopRate).toFixed(2)) : newTotalCOP;
 
         await client.query(
-          `UPDATE orders SET type = 'delivery', table_number = NULL, customer_name = $1, delivery_fee_usd = $2, total_usd = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4`,
-          [finalCustName, fee, newTotal, id]
+          `UPDATE orders SET type = 'delivery', table_number = NULL, customer_name = $1, delivery_fee_usd = $2, delivery_fee_cop = $3, total_usd = $4, total_cop = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6`,
+          [finalCustName, feeUSD, feeCOP, newTotalUSD, newTotalCOP, id]
         );
 
         if (oldTableNumber) {
@@ -853,10 +919,11 @@ module.exports = function(io) {
           }
         }
       } else if (action === 'to-pickup') {
-        const newTotal = itemsSubtotal;
+        const newTotalCOP = itemsSubtotalCOP;
+        const newTotalUSD = currentCopRate > 0 ? Number((newTotalCOP / currentCopRate).toFixed(2)) : newTotalCOP;
         await client.query(
-          `UPDATE orders SET type = 'pickup', table_number = NULL, delivery_fee_usd = 0, total_usd = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-          [newTotal, id]
+          `UPDATE orders SET type = 'pickup', table_number = NULL, delivery_fee_usd = 0, delivery_fee_cop = 0, total_usd = $1, total_cop = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+          [newTotalUSD, newTotalCOP, id]
         );
 
         if (oldTableNumber) {
@@ -875,11 +942,14 @@ module.exports = function(io) {
           'UPDATE order_items SET is_delivery = (id = ANY($2::text[])) WHERE order_id = $1',
           [id, targetIds]
         );
-        const fee = deliveryFeeUSD !== undefined ? Number(deliveryFeeUSD) : (Number(order.delivery_fee_usd) || 0);
-        const newTotal = Number((itemsSubtotal + fee).toFixed(2));
+        let rawFee = deliveryFeeUSD !== undefined ? Number(deliveryFeeUSD) : (Number(order.delivery_fee_cop) || Number(order.delivery_fee_usd) || 0);
+        let feeCOP = rawFee >= 100 ? rawFee : Math.round(rawFee * currentCopRate);
+        let feeUSD = currentCopRate > 0 ? Number((feeCOP / currentCopRate).toFixed(2)) : feeCOP;
+        const newTotalCOP = itemsSubtotalCOP + feeCOP;
+        const newTotalUSD = currentCopRate > 0 ? Number((newTotalCOP / currentCopRate).toFixed(2)) : newTotalCOP;
         await client.query(
-          `UPDATE orders SET delivery_fee_usd = $1, total_usd = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
-          [fee, newTotal, id]
+          `UPDATE orders SET delivery_fee_usd = $1, delivery_fee_cop = $2, total_usd = $3, total_cop = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5`,
+          [feeUSD, feeCOP, newTotalUSD, newTotalCOP, id]
         );
       }
 
@@ -1036,7 +1106,7 @@ module.exports = function(io) {
       await client.query('BEGIN');
 
       const { rows: orderRows } = await client.query(
-        `SELECT id, order_number, type, table_number, customer_name, waiter_name, status, payment_status, total_usd, delivery_fee_usd, shift FROM orders WHERE id = $1 FOR UPDATE`,
+        `SELECT id, order_number, type, table_number, customer_name, waiter_name, status, payment_status, total_usd, total_cop, delivery_fee_usd, delivery_fee_cop, shift FROM orders WHERE id = $1 FOR UPDATE`,
         [id]
       );
 
@@ -1108,8 +1178,23 @@ module.exports = function(io) {
         itemsTotalUSD += itemPrice * qty;
       }
 
-      const deliveryFee = (req.body.deliveryFeeUSD !== undefined ? Number(req.body.deliveryFeeUSD) : Number(order.delivery_fee_usd)) || 0;
-      const newTotalUSD = Number((itemsTotalUSD + deliveryFee).toFixed(2));
+      const ratesRes = await client.query(`SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = 'ambos' LIMIT 1`);
+      const currentCopRate = Number(ratesRes.rows[0]?.cop_rate || 3100);
+
+      let deliveryFeeCOP = 0;
+      if (req.body.deliveryFeeCOP !== undefined) {
+        deliveryFeeCOP = Number(req.body.deliveryFeeCOP) || 0;
+      } else if (req.body.deliveryFeeUSD !== undefined) {
+        const rawDel = Number(req.body.deliveryFeeUSD) || 0;
+        deliveryFeeCOP = rawDel >= 100 ? rawDel : Math.round(rawDel * currentCopRate);
+      } else {
+        const rawDelCop = Number(order.delivery_fee_cop) || 0;
+        const rawDelUsd = Number(order.delivery_fee_usd) || 0;
+        deliveryFeeCOP = rawDelCop > 0 ? rawDelCop : (rawDelUsd >= 100 ? rawDelUsd : Math.round(rawDelUsd * currentCopRate));
+      }
+      const newTotalCOP = Math.round(itemsTotalUSD + deliveryFeeCOP);
+      const newTotalUSD = currentCopRate > 0 ? Number((newTotalCOP / currentCopRate).toFixed(2)) : newTotalCOP;
+      const deliveryFeeUSD = currentCopRate > 0 ? Number((deliveryFeeCOP / currentCopRate).toFixed(2)) : deliveryFeeCOP;
 
       // Si la orden estaba como lista o entregada pero se le añadieron ítems de cocina (o cualquier ítem en delivery/pickup), reabrir a 'en_preparacion'
       const isPickupOrDelivery = order.type === 'delivery' || order.type === 'pickup';
@@ -1120,9 +1205,9 @@ module.exports = function(io) {
         nextStatus = 'en_preparacion';
       }
 
-      const updateFields = ['total_usd = $1', 'status = $2', 'delivery_fee_usd = $3', 'updated_at = CURRENT_TIMESTAMP'];
-      const updateValues = [newTotalUSD, nextStatus, deliveryFee, id];
-      let paramIdx = 5;
+      const updateFields = ['total_usd = $1', 'total_cop = $2', 'status = $3', 'delivery_fee_usd = $4', 'delivery_fee_cop = $5', 'updated_at = CURRENT_TIMESTAMP'];
+      const updateValues = [newTotalUSD, newTotalCOP, nextStatus, deliveryFeeUSD, deliveryFeeCOP, id];
+      let paramIdx = 7;
 
       if (customerName && customerName.trim()) {
         updateFields.push(`customer_name = $${paramIdx++}`);
@@ -1134,7 +1219,7 @@ module.exports = function(io) {
       }
 
       await client.query(
-        `UPDATE orders SET ${updateFields.join(', ')} WHERE id = $4`,
+        `UPDATE orders SET ${updateFields.join(', ')} WHERE id = $6`,
         updateValues
       );
 

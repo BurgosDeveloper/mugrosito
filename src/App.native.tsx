@@ -433,7 +433,7 @@ const NativeAppContent: React.FC = () => {
 
         <View style={styles.brandContainer}>
           <Image source={require('../assets/icon.png')} style={{ width: 26, height: 26, borderRadius: 6 }} resizeMode="contain" />
-          <Text style={styles.brandName}>CRISPY</Text>
+          <Text style={styles.brandName}>MUGROSITO</Text>
           <View style={styles.badgeTag}>
             <Text style={styles.badgeTagText}>{isConnected ? 'EN VIVO' : 'OFFLINE'}</Text>
           </View>

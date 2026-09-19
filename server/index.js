@@ -52,7 +52,7 @@ if (!fs.existsSync(uploadsDir)) {
 app.use('/uploads', express.static(uploadsDir));
 
 app.get('/api/connection-info', (req, res) => {
-  res.json({ app: 'crispy', ...refreshLanConnectionInfo() });
+  res.json({ app: 'mugrosito', ...refreshLanConnectionInfo() });
 });
 
 const server = http.createServer(app);

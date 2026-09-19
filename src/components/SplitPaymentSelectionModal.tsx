@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IoCheckmarkCircle, IoClose, IoPersonOutline, IoReceiptOutline } from 'react-icons/io5';
 import { Order } from '../data/mockData';
-import { roundCOP } from '../utils/currencyRounding';
 import { formatRemovedIngredients } from '../utils/burgerProteins';
 
 interface SplitPaymentSelectionModalProps {
@@ -20,17 +19,23 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
   initialItemIds = [],
   onCancel,
   onConfirm,
-  exchangeRates = { COP: 3950, Bs: 36.5 },
+  exchangeRates = { COP: 3100, Bs: 3.2 },
 }) => {
   const [payerName, setPayerName] = useState(initialPayerName);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>(initialItemIds);
 
-  const selectedTotalUSD = useMemo(() => {
+  const copRate = exchangeRates?.COP || 3100;
+  const bsRate = exchangeRates?.Bs || 3.2;
+
+  const selectedTotalCOP = useMemo(() => {
     if (!order) return 0;
     return order.items
       .filter((item) => selectedItemIds.includes(item.id))
-      .reduce((total, item) => total + item.price * item.quantity, 0);
+      .reduce((total, item) => total + (item.price || 0) * (item.quantity || 1), 0);
   }, [order, selectedItemIds]);
+
+  const selectedTotalUSD = copRate > 0 ? selectedTotalCOP / copRate : 0;
+  const selectedTotalBs = bsRate > 0 ? selectedTotalCOP / bsRate : 0;
 
   if (!order) return null;
 
@@ -52,12 +57,9 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
   const normalizedPayerName = payerName.trim();
   const canContinue = normalizedPayerName.length > 0 && selectedItemIds.length > 0;
 
-  const copRate = exchangeRates?.COP || 3950;
-  const bsRate = exchangeRates?.Bs || 36.5;
-
   return createPortal(
     <div className="fixed inset-0 z-[100] flex flex-col bg-white text-gray-900 w-full h-full max-h-screen overflow-hidden select-none">
-      {/* 1. TOP HEADER - CLARO OFICIAL CRISPY */}
+      {/* 1. TOP HEADER - CLARO OFICIAL MUGROSITO */}
       <header className="bg-white text-gray-900 px-5 py-3 flex items-center justify-between border-b-2 border-yellow-400 shrink-0 shadow-xs">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-2xl">👥</span>
@@ -137,7 +139,7 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
           {order.items.map((item) => {
             const isPaid = item.isPaidIndividually;
             const isSelected = selectedItemIds.includes(item.id);
-            const itemTotalUSD = item.price * item.quantity;
+            const itemTotalCOP = item.price * item.quantity;
 
             return (
               <button
@@ -218,10 +220,10 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
 
                 <div className="text-right shrink-0">
                   <span className="text-lg sm:text-2xl font-black text-gray-900 block">
-                    ${itemTotalUSD.toFixed(2)} USD
+                    {Math.round(itemTotalCOP).toLocaleString('es-CO')} COP
                   </span>
                   <span className="text-xs sm:text-sm font-bold text-gray-500">
-                    ${(item.price).toFixed(2)} c/u
+                    {Math.round(item.price || 0).toLocaleString('es-CO')} c/u
                   </span>
                 </div>
               </button>
@@ -230,7 +232,7 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
         </div>
       </main>
 
-      {/* 3. FOOTER TOTALES Y BOTONES - CLARO OFICIAL CRISPY */}
+      {/* 3. FOOTER TOTALES Y BOTONES - CLARO OFICIAL MUGROSITO */}
       <footer className="bg-white text-gray-900 px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t-2 border-yellow-400 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-lg">
         <div>
           <span className="text-xs font-black uppercase tracking-wider text-gray-500 block">
@@ -238,13 +240,13 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
           </span>
           <div className="flex items-baseline gap-3 flex-wrap mt-0.5">
             <span className="text-2xl sm:text-3xl font-black text-black">
-              ${selectedTotalUSD.toFixed(2)} USD
+              {Math.round(selectedTotalCOP).toLocaleString('es-CO')} COP
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇨🇴 {roundCOP(selectedTotalUSD * copRate).toLocaleString()} COP
+              🇺🇸 ${selectedTotalUSD.toFixed(2)} USD
             </span>
             <span className="text-xs sm:text-sm font-bold text-gray-700">
-              🇻🇪 {(selectedTotalUSD * bsRate).toFixed(2)} Bs
+              🇻🇪 {selectedTotalBs.toFixed(2)} Bs
             </span>
           </div>
         </div>

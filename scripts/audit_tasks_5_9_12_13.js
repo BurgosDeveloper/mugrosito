@@ -1,4 +1,4 @@
-﻿const { initDb, query } = require('../server/db');
+const { initDb, query } = require('../server/db');
 const { isKitchenItem } = require('../server/helpers/thermalPrinter');
 const { roundCOP, roundBs, roundUSD } = require('../server/helpers/currencyRounding');
 
@@ -10,10 +10,11 @@ async function runAudit() {
   // 1. Validar Tarea 13: Redondeo Comercial Contable
   console.log('\n[1] VALIDANDO TAREA 13: Redondeo comercial contable (COP al millar)');
   const testCases = [
-    { input: 13825, expected: 14000, desc: '13,825 COP -> 14,000 COP' },
-    { input: 39500, expected: 40000, desc: '39,500 COP -> 40,000 COP' },
+    { input: 1500,  expected: 1500,  desc: '1,500 COP -> 1,500 COP (<= 500 se mantiene en 500)' },
+    { input: 1600,  expected: 2000,  desc: '1,600 COP -> 2,000 COP (> 500 aproxima al millar)' },
+    { input: 39500, expected: 39500, desc: '39,500 COP -> 39,500 COP (500 exacto se mantiene en 500)' },
+    { input: 39600, expected: 40000, desc: '39,600 COP -> 40,000 COP (> 500 aproxima al siguiente millar)' },
     { input: 40000, expected: 40000, desc: '40,000 COP -> 40,000 COP (múltiplo exacto)' },
-    { input: 3950,  expected: 4000,  desc: '3,950 COP -> 4,000 COP' },
     { input: 0,     expected: 0,     desc: '0 COP -> 0 COP' },
   ];
   let allRoundPassed = true;

@@ -1,15 +1,25 @@
-// Report Service - Generador de Reportes Auditables en PDF e Impresión Profesional para Crispy Burger POS
+// Report Service - Generador de Reportes Auditables en PDF e Impresión Profesional para Mugrosito POS
 
-import { Order, CajaChicaTransaction, ExchangeRates } from '../data/mockData';
-import { ReporteIntervaloData } from './excelExportService';
+import { Order, ExchangeRates, CajaChicaTransaction } from '../data/mockData';
 import { roundCOP } from '../utils/currencyRounding';
 import { isSalsaItem } from '../utils/productClassifier';
 
+export interface ReporteIntervaloData {
+  dateRange: { from: string; to: string };
+  orders: any[];
+  items: any[];
+  payments: any[];
+  transactions: any[];
+  edits: any[];
+  shiftCierres?: any[];
+  exchangeRates: { COP: number; Bs: number };
+}
+
 export class ReportService {
   private openPrintWindow(title: string, htmlContent: string) {
-    const printWin = window.open('', '_blank', 'width=900,height=750');
+    const printWin = window.open('', '_blank', 'width=450,height=700');
     if (!printWin) {
-      alert('Por favor habilite las ventanas emergentes (popups) para ver e imprimir los reportes PDF.');
+      alert('Por favor, permite las ventanas emergentes (pop-ups) para ver el reporte imprimible.');
       return;
     }
 
@@ -18,7 +28,7 @@ export class ReportService {
       <html lang="es">
       <head>
         <meta charset="UTF-8">
-        <title>${title} - Crispy Burger POS</title>
+        <title>${title} - Mugrosito POS</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&display=swap');
           @page {
@@ -138,7 +148,7 @@ export class ReportService {
       <body>
         <div class="header">
           <div>
-            <div class="logo-title">🍔 CRISPY BURGER</div>
+            <div class="logo-title">🌭 MUGROSITO POS</div>
             <div class="logo-sub">Sistema de Gestión & Auditoría de Ventas</div>
           </div>
           <div class="doc-meta">
@@ -200,10 +210,12 @@ export class ReportService {
     let cop = payment.cashTenderedCOP || 0;
     let bs = payment.cashTenderedBs || 0;
     const curr = this.paymentCurrency(payment.paymentMethod);
+    const copR = payment.copRate || 3100;
+    const bsR = payment.bsRate || 3.2;
     if (usd === 0 && cop === 0 && bs === 0 && payment.amountPaidUSD > 0) {
       if (curr === 'USD') usd = payment.amountPaidUSD;
-      if (curr === 'COP') cop = payment.amountPaidUSD * payment.copRate;
-      if (curr === 'Bs') bs = payment.amountPaidUSD * payment.bsRate;
+      if (curr === 'COP') cop = payment.amountPaidUSD * copR;
+      if (curr === 'Bs') bs = bsR > 0 ? (payment.amountPaidUSD * copR) / bsR : 0;
     }
     const nativeAmount = curr === 'USD' ? usd : curr === 'COP' ? cop : bs;
     return {
@@ -212,7 +224,7 @@ export class ReportService {
       usd,
       cop,
       bs,
-      equivalentUSD: usd + (cop / (payment.copRate || 3950)) + (bs / (payment.bsRate || 36.5)),
+      equivalentUSD: usd + (cop / copR) + (bsR > 0 && copR > 0 ? (bs * bsR) / copR : 0),
     };
   }
 
@@ -226,6 +238,9 @@ export class ReportService {
     const changeCOP = Number(payment.changeGivenCOP) || 0;
     const changeBs = Number(payment.changeGivenBs) || 0;
 
+    const copR = payment.copRate || 3100;
+    const bsR = payment.bsRate || 3.2;
+
     let usd = 0;
     let cop = 0;
     let bs = 0;
@@ -233,9 +248,9 @@ export class ReportService {
     if (curr === 'USD') {
       usd = tenderUSD > 0 ? (tenderUSD - changeUSD) : paidUSD;
     } else if (curr === 'COP') {
-      cop = tenderCOP > 0 ? (tenderCOP - changeCOP) : (paidUSD * (payment.copRate || 3950));
+      cop = tenderCOP > 0 ? (tenderCOP - changeCOP) : (paidUSD * copR);
     } else if (curr === 'Bs') {
-      bs = tenderBs > 0 ? (tenderBs - changeBs) : (paidUSD * (payment.bsRate || 36.5));
+      bs = tenderBs > 0 ? (tenderBs - changeBs) : (bsR > 0 ? (paidUSD * copR) / bsR : 0);
     }
 
     const nativeAmount = curr === 'USD' ? usd : curr === 'COP' ? cop : bs;
@@ -271,7 +286,7 @@ export class ReportService {
     return raw || (it.productName || it.name || 'Producto').trim();
   }
 
-  // 1. Reporte de Hamburguesas e Ítems Vendidos
+  // 1. Reporte de Hot Dogs e Ítems Vendidos
   generateProductsSoldReport(orders: Order[], rates: ExchangeRates) {
     const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
     const tally: Record<string, { qty: number; revenueUSD: number; category: string }> = {};
@@ -281,7 +296,7 @@ export class ReportService {
       o.items.forEach((it) => {
         const catLower = (it.category || '').toLowerCase();
         const cleanName = this.getReportBaseProductName(it);
-        const isBurger = catLower.includes('burger') || catLower.includes('hamburguesa') || cleanName.toLowerCase().includes('burger') || cleanName.toLowerCase().includes('crispy');
+        const isComida = catLower.includes('burger') || catLower.includes('hamburguesa') || catLower.includes('hot dog') || catLower.includes('perro') || catLower.includes('mugrosito') || cleanName.toLowerCase().includes('burger') || cleanName.toLowerCase().includes('hot dog') || cleanName.toLowerCase().includes('perro') || cleanName.toLowerCase().includes('mugrosito');
         const displayName = cleanName;
         const itQty = it.quantity || 1;
 
@@ -324,7 +339,7 @@ export class ReportService {
           tally[displayName] = {
             qty: 0,
             revenueUSD: 0,
-            category: isBurger ? 'Hamburguesas' : (it.category || 'Bebidas/Otros'),
+            category: isComida ? 'Hot Dogs' : (it.category || 'Bebidas/Otros'),
           };
         }
         tally[displayName].qty += itQty;
@@ -366,7 +381,7 @@ export class ReportService {
       .join('');
 
     const content = `
-      <div class="section-title">DESGLOSE DE HAMBURGUESAS E ÍTEMS VENDIDOS</div>
+      <div class="section-title">DESGLOSE DE HOT DOGS Y COMIDAS VENDIDAS</div>
       <table>
         <thead>
           <tr>
@@ -394,10 +409,14 @@ export class ReportService {
       </div>
     `;
 
-    this.openPrintWindow('Reporte_Ventas_Hamburguesas', content);
+    this.openPrintWindow('Reporte_Ventas_HotDogs', content);
   }
 
-  // Alias para retrocompatibilidad
+  // Alias para compatibilidad
+  generateHotDogsSoldReport(orders: Order[], rates: ExchangeRates) {
+    return this.generateProductsSoldReport(orders, rates);
+  }
+
   generatePizzasSoldReport(orders: Order[], rates: ExchangeRates) {
     return this.generateProductsSoldReport(orders, rates);
   }
@@ -427,19 +446,25 @@ export class ReportService {
           const changeBs = Number(p.changeGivenBs) || 0;
           const pUSD = Number(p.amountPaidUSD) || 0;
 
+          const cRate = p.copRate || rates.COP || 3100;
+          const bRate = p.bsRate || rates.Bs || 3.2;
+
           if (pCurr === 'USD') {
             byCurrency.USD += tenderUSD > 0 ? (tenderUSD - changeUSD) : pUSD;
           } else if (pCurr === 'COP') {
-            byCurrency.COP += tenderCOP > 0 ? (tenderCOP - changeCOP) : (pUSD * (p.copRate || rates.COP));
+            byCurrency.COP += tenderCOP > 0 ? (tenderCOP - changeCOP) : (pUSD * cRate);
           } else if (pCurr === 'Bs') {
-            byCurrency.Bs += tenderBs > 0 ? (tenderBs - changeBs) : (pUSD * (p.bsRate || rates.Bs));
+            byCurrency.Bs += tenderBs > 0 ? (tenderBs - changeBs) : (bRate > 0 ? (pUSD * cRate) / bRate : 0);
           }
         });
       } else {
         const curr = this.paymentCurrency(o.paymentMethod || 'Efectivo USD');
-        if (curr === 'USD') byCurrency.USD += o.totalUSD;
-        if (curr === 'COP') byCurrency.COP += o.totalUSD * (o.copRateAtPayment || rates.COP);
-        if (curr === 'Bs') byCurrency.Bs += o.totalUSD * (o.bsRateAtPayment || rates.Bs);
+        const cRate = o.copRateAtPayment || rates.COP || 3100;
+        const bRate = o.bsRateAtPayment || rates.Bs || 3.2;
+        const ordCOP = (o as any).totalCOP || (o.totalUSD * cRate);
+        if (curr === 'USD') byCurrency.USD += (cRate > 0 ? ordCOP / cRate : o.totalUSD);
+        if (curr === 'COP') byCurrency.COP += ordCOP;
+        if (curr === 'Bs') byCurrency.Bs += (bRate > 0 ? ordCOP / bRate : 0);
       }
     });
 
@@ -460,13 +485,15 @@ export class ReportService {
             const changeCOP = Number(p.changeGivenCOP) || 0;
             const changeBs = Number(p.changeGivenBs) || 0;
             const pUSD = Number(p.amountPaidUSD) || 0;
+            const cRate = p.copRate || rates.COP || 3100;
+            const bRate = p.bsRate || rates.Bs || 3.2;
 
             if (pCurr === 'USD') {
               orderUSD += tenderUSD > 0 ? (tenderUSD - changeUSD) : pUSD;
             } else if (pCurr === 'COP') {
-              orderCOP += tenderCOP > 0 ? (tenderCOP - changeCOP) : (pUSD * (p.copRate || rates.COP));
+              orderCOP += tenderCOP > 0 ? (tenderCOP - changeCOP) : (pUSD * cRate);
             } else if (pCurr === 'Bs') {
-              orderBs += tenderBs > 0 ? (tenderBs - changeBs) : (pUSD * (p.bsRate || rates.Bs));
+              orderBs += tenderBs > 0 ? (tenderBs - changeBs) : (bRate > 0 ? (pUSD * cRate) / bRate : 0);
             }
             if (p.paymentMethod && !methodsUsed.includes(p.paymentMethod)) {
               methodsUsed.push(p.paymentMethod);
@@ -474,9 +501,12 @@ export class ReportService {
           });
         } else {
           const curr = this.paymentCurrency(o.paymentMethod || 'Efectivo USD');
-          if (curr === 'USD') orderUSD = o.totalUSD;
-          if (curr === 'COP') orderCOP = o.totalUSD * (o.copRateAtPayment || rates.COP);
-          if (curr === 'Bs') orderBs = o.totalUSD * (o.bsRateAtPayment || rates.Bs);
+          const cRate = o.copRateAtPayment || rates.COP || 3100;
+          const bRate = o.bsRateAtPayment || rates.Bs || 3.2;
+          const ordCOP = (o as any).totalCOP || (o.totalUSD * cRate);
+          if (curr === 'USD') orderUSD = (cRate > 0 ? ordCOP / cRate : o.totalUSD);
+          if (curr === 'COP') orderCOP = ordCOP;
+          if (curr === 'Bs') orderBs = (bRate > 0 ? ordCOP / bRate : 0);
           if (o.paymentMethod) methodsUsed.push(o.paymentMethod);
         }
 
@@ -617,33 +647,304 @@ export class ReportService {
     this.openPrintWindow('Reporte_Vueltos_y_Egresos', content);
   }
 
+  // Helper centralizado para categorizar y convertir ítems facturados en ambas monedas (USD y COP)
+  private categorizeReportItems(
+    cashItems: any[],
+    billedOrders: any[],
+    copRateGlobal: number,
+    bsRateGlobal: number
+  ) {
+    const ordersById = new Map<string, any>(billedOrders.map((o) => [o.id, o]));
+
+    const paidExtrasMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number; unitPriceUSD: number; unitPriceCOP: number }>();
+    let freeToppingsCount = 0;
+    const foodMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+    const drinkMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+    const othersProductMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+
+    // 1. Deliverys de Comandas Facturadas
+    const deliveryTierMap = new Map<number, { name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>();
+    billedOrders.forEach((ord) => {
+      const ordCopRate = Number(ord.copRateAtPayment) || copRateGlobal;
+      let feeUSD = Number(ord.deliveryFeeUSD) || 0;
+      let feeCOP = Number(ord.deliveryFeeCOP) || 0;
+      if (feeCOP === 0 && feeUSD > 0) feeCOP = Math.round(feeUSD * ordCopRate);
+      if (feeUSD === 0 && feeCOP > 0) feeUSD = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
+
+      if (ord.type === 'delivery' || feeUSD > 0 || feeCOP > 0) {
+        const tierKey = feeCOP > 0 ? feeCOP : Math.round(feeUSD * ordCopRate);
+        const name = feeCOP > 0 ? `Delivery ($${feeUSD.toFixed(2)})` : 'Delivery';
+        const existing = deliveryTierMap.get(tierKey) || { name, quantity: 0, subtotalUSD: 0, subtotalCOP: 0 };
+        existing.quantity += 1;
+        existing.subtotalUSD += feeUSD;
+        existing.subtotalCOP += feeCOP;
+        deliveryTierMap.set(tierKey, existing);
+      }
+    });
+
+    // 2. Items
+    cashItems.forEach((it: any) => {
+      const itQty = Number(it.quantity) || 1;
+      const cleanName = this.getReportBaseProductName(it);
+      const parentOrder = ordersById.get(it.orderId);
+      const itemCopRate = Number(parentOrder?.copRateAtPayment) || Number(it.copRate) || copRateGlobal;
+
+      const extrasList: any[] = [];
+      if (Array.isArray(it.extras)) {
+        extrasList.push(...it.extras);
+      } else if (it.extrasJson && Array.isArray(it.extrasJson)) {
+        extrasList.push(...it.extrasJson);
+      } else if (typeof it.extrasJson === 'string') {
+        try {
+          const parsed = JSON.parse(it.extrasJson);
+          if (Array.isArray(parsed)) extrasList.push(...parsed);
+        } catch (e) {}
+      }
+
+      let paidExtrasUnitCostUSD = 0;
+      let paidExtrasUnitCostCOP = 0;
+
+      extrasList.forEach((extra) => {
+        const rawExPrice = Number(extra.price) || 0;
+        const exQty = Number(extra.quantity) || 1;
+        const rawName = (extra.name || 'Adicional').trim();
+        const cleanBaseName = rawName.replace(/^\d+x\s*/i, '').trim();
+
+        if (rawExPrice > 0) {
+          const exIsCOP = rawExPrice >= 100;
+          const exCOP = exIsCOP ? rawExPrice : Math.round(rawExPrice * itemCopRate);
+          const exUSD = exIsCOP ? (itemCopRate > 0 ? rawExPrice / itemCopRate : 0) : rawExPrice;
+
+          paidExtrasUnitCostUSD += exUSD;
+          paidExtrasUnitCostCOP += exCOP;
+
+          const unitPriceUSD = exUSD / exQty;
+          const unitPriceCOP = exCOP / exQty;
+
+          const current = paidExtrasMap.get(cleanBaseName) || {
+            name: `ADD ${cleanBaseName}`,
+            quantity: 0,
+            subtotalUSD: 0,
+            subtotalCOP: 0,
+            unitPriceUSD,
+            unitPriceCOP,
+          };
+          current.quantity += itQty * exQty;
+          current.subtotalUSD += exUSD * itQty;
+          current.subtotalCOP = (current.subtotalCOP || 0) + exCOP * itQty;
+          paidExtrasMap.set(cleanBaseName, current);
+        } else {
+          freeToppingsCount += itQty * exQty;
+        }
+      });
+
+      const rawPrice = Number(it.price) || 0;
+      const isCOP = rawPrice >= 100;
+      const itemPriceCOP = isCOP ? rawPrice : Math.round(rawPrice * itemCopRate);
+      const itemPriceUSD = isCOP ? (itemCopRate > 0 ? rawPrice / itemCopRate : 0) : rawPrice;
+
+      const baseUnitPriceUSD = Math.max(0, itemPriceUSD - paidExtrasUnitCostUSD);
+      const baseUnitPriceCOP = Math.max(0, itemPriceCOP - paidExtrasUnitCostCOP);
+      const baseSubtotalUSD = baseUnitPriceUSD * itQty;
+      const baseSubtotalCOP = baseUnitPriceCOP * itQty;
+
+      const catLower = (it.category || '').toLowerCase().trim();
+      const rawLower = (it.productName || it.name || '').toLowerCase().trim();
+      const isDrink =
+        catLower.includes('bebida') ||
+        catLower.includes('drink') ||
+        catLower.includes('refresco') ||
+        catLower.includes('jugo') ||
+        catLower.includes('licor') ||
+        catLower.includes('cerveza') ||
+        catLower.includes('agua') ||
+        catLower.includes('trago') ||
+        catLower.includes('coctel') ||
+        catLower.includes('cóctel') ||
+        catLower.includes('vino') ||
+        catLower.includes('café') ||
+        catLower.includes('cafe') ||
+        catLower.includes('malta') ||
+        Boolean(it.drinkType) ||
+        Boolean(it.flavor) ||
+        rawLower.includes('refresco') ||
+        rawLower.includes('jugo') ||
+        rawLower.includes('agua') ||
+        rawLower.includes('cerveza') ||
+        rawLower.includes('nestea') ||
+        rawLower.includes('granizado') ||
+        rawLower.includes('soda') ||
+        rawLower.includes('malta') ||
+        rawLower.includes('licor') ||
+        rawLower.includes('ron') ||
+        rawLower.includes('vodka') ||
+        rawLower.includes('whisky') ||
+        rawLower.includes('mojito') ||
+        rawLower.includes('té') ||
+        rawLower.includes('te ') ||
+        rawLower.endsWith(' te');
+
+      const isOther =
+        catLower.includes('delivery') ||
+        catLower.includes('servicio') ||
+        catLower.includes('otro') ||
+        rawLower.includes('delivery') ||
+        rawLower.includes('servicio');
+
+      const targetMap = isDrink ? drinkMap : isOther ? othersProductMap : foodMap;
+      const prevProd = targetMap.get(cleanName) || { name: cleanName, quantity: 0, subtotalUSD: 0, subtotalCOP: 0 };
+      prevProd.quantity += itQty;
+      prevProd.subtotalUSD += baseSubtotalUSD;
+      prevProd.subtotalCOP += baseSubtotalCOP;
+      targetMap.set(cleanName, prevProd);
+    });
+
+    const comidasItems = Array.from(foodMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+    const bebidasItems = Array.from(drinkMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+
+    const adicionalesItems: Array<{ name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }> = [];
+    const sortedExtras = Array.from(paidExtrasMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    sortedExtras.forEach((extra) => {
+      if (extra.quantity > 0) {
+        adicionalesItems.push({
+          name: extra.name,
+          quantity: extra.quantity,
+          subtotalUSD: extra.subtotalUSD,
+          subtotalCOP: extra.subtotalCOP,
+        });
+      }
+    });
+    if (freeToppingsCount > 0) {
+      adicionalesItems.push({
+        name: 'Toppings Gratis',
+        quantity: freeToppingsCount,
+        subtotalUSD: 0,
+        subtotalCOP: 0,
+      });
+    }
+
+    const otrosItems: Array<{ name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }> = [];
+    const sortedFees = Array.from(deliveryTierMap.values()).sort((a, b) => a.subtotalCOP - b.subtotalCOP);
+    sortedFees.forEach((tier) => {
+      if (tier.quantity > 0) {
+        otrosItems.push({
+          name: tier.name,
+          quantity: tier.quantity,
+          subtotalUSD: tier.subtotalUSD,
+          subtotalCOP: tier.subtotalCOP,
+        });
+      }
+    });
+    Array.from(othersProductMap.values()).filter((p) => p.quantity > 0).sort((a, b) => a.name.localeCompare(b.name)).forEach((p) => otrosItems.push(p));
+
+    const unifiedItems = [...comidasItems, ...bebidasItems, ...adicionalesItems, ...otrosItems];
+    const totalUnits = unifiedItems.reduce((total, item) => total + item.quantity, 0);
+    const totalRevenueUSD = unifiedItems.reduce((sum, it) => sum + it.subtotalUSD, 0);
+    const totalRevenueCOP = unifiedItems.reduce((sum, it) => sum + it.subtotalCOP, 0);
+    const totalRevenueBs = bsRateGlobal > 0 ? (totalRevenueCOP / bsRateGlobal) : 0;
+
+    return {
+      comidasItems,
+      bebidasItems,
+      adicionalesItems,
+      otrosItems,
+      totalUnits,
+      totalRevenueUSD,
+      totalRevenueCOP,
+      totalRevenueBs,
+    };
+  }
+
   // 4. Reporte de Hamburguesas e Ítems Vendidos por Intervalo
   generateProductsSoldIntervalReport(data: ReporteIntervaloData) {
-    const tally: Record<string, { category: string; name: string; quantity: number; totalUSD: number }> = {};
-    data.items.forEach((item) => {
-      const catLower = (item.category || '').toLowerCase();
-      const cleanName = this.getReportBaseProductName(item);
-      const isBurger = catLower.includes('burger') || catLower.includes('hamburguesa') || cleanName.toLowerCase().includes('burger') || cleanName.toLowerCase().includes('crispy');
-      const category = isBurger ? 'Hamburguesas' : (item.category || 'Sin categoría');
-      const displayName = cleanName;
-      const key = `${category}|${displayName}`;
-      if (!tally[key]) tally[key] = { category, name: displayName, quantity: 0, totalUSD: 0 };
-      tally[key].quantity += item.quantity;
-      tally[key].totalUSD += item.price * item.quantity;
-    });
-    const rows = Object.entries(tally).sort((a, b) => a[1].category.localeCompare(b[1].category) || a[0].localeCompare(b[0]))
-      .map(([, item]) => `<tr><td>${this.escapeHtml(item.category)}</td><td><strong>${this.escapeHtml(item.name)}</strong></td><td style="text-align:right;">${item.quantity}</td><td style="text-align:right;">$${item.totalUSD.toFixed(2)}</td></tr>`).join('');
-    const totalUnits = data.items.reduce((total, item) => total + item.quantity, 0);
-    const totalRevenueUSD = Object.values(tally).reduce((sum, it) => sum + it.totalUSD, 0);
+    const billedOrders = (data.orders || []).filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
+    const billedOrderIds = new Set(billedOrders.map((o) => o.id));
+    const cashItems = (data.items || []).filter((it) => billedOrderIds.has(it.orderId));
+
+    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+
+    const cat = this.categorizeReportItems(cashItems, billedOrders, copRateGlobal, bsRateGlobal);
+
+    const renderRows = (items: Array<{ name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>, emptyMsg: string) => {
+      if (items.length === 0) return `<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding:5px;">${emptyMsg}</td></tr>`;
+      return items.map((item) => `
+        <tr>
+          <td><strong>${this.escapeHtml(item.name)}</strong></td>
+          <td style="text-align:center; width:60px;">${item.quantity}</td>
+          <td style="text-align:right; width:150px; font-weight:700;">
+            $${item.subtotalUSD.toFixed(2)} USD
+            <span style="font-size:10px; font-weight:normal; color:#4b5563; display:block;">
+              ${Math.round(item.subtotalCOP).toLocaleString('es-CO')} COP
+            </span>
+          </td>
+        </tr>
+      `).join('');
+    };
+
     this.openPrintWindow('Hamburguesas_Vendidas_Intervalo', `
-      <div class="section-title">HAMBURGUESAS E ÍTEMS VENDIDOS POR TIPO Y UNIDADES</div>
+      <div class="section-title">HAMBURGUESAS E ÍTEMS VENDIDOS (DESGLOSE COMPLETO)</div>
       <p style="font-size:12px; color:#4b5563;">${this.intervalTitle(data)}</p>
-      <table><thead><tr><th>Categoría</th><th>Ítem</th><th style="text-align:right;">Unidades</th><th style="text-align:right;">Total USD</th></tr></thead><tbody>${rows || '<tr><td colspan="4" style="text-align:center;">Sin ítems facturados en el intervalo.</td></tr>'}</tbody></table>
-      <div class="total-box"><div><div class="total-label">UNIDADES FACTURADAS</div><strong>${totalUnits}</strong></div><div><div class="total-label">TOTAL FACTURADO PRODUCTOS</div><strong style="color:#047857; font-size:14px;">$${totalRevenueUSD.toFixed(2)} USD</strong></div></div>
+
+      <!-- 1. COMIDAS -->
+      <div style="font-size:10px; font-weight:900; margin:10px 0 3px; padding:3px 8px; background:#fef3c7; color:#92400e; border-left:3px solid #f59e0b;">
+        1. COMIDAS (Hamburguesas, Hot Dogs y Platos)
+      </div>
+      <table>
+        <thead><tr><th>Producto</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <tbody>${renderRows(cat.comidasItems, 'Sin comidas facturadas en el intervalo.')}</tbody>
+      </table>
+
+      <!-- 2. BEBIDAS -->
+      <div style="font-size:10px; font-weight:900; margin:14px 0 3px; padding:3px 8px; background:#e0f2fe; color:#075985; border-left:3px solid #0284c7;">
+        2. BEBIDAS (Refrescos, Jugos, Cervezas, Aguas)
+      </div>
+      <table>
+        <thead><tr><th>Bebida (Unificada)</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <tbody>${renderRows(cat.bebidasItems, 'Sin bebidas facturadas en el intervalo.')}</tbody>
+      </table>
+
+      <!-- 3. ADICIONALES -->
+      <div style="font-size:10px; font-weight:900; margin:14px 0 3px; padding:3px 8px; background:#f3e8ff; color:#6b21a8; border-left:3px solid #9333ea;">
+        3. ADICIONALES (Pagos y Toppings Gratis)
+      </div>
+      <table>
+        <thead><tr><th>Adicional / Topping</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <tbody>${renderRows(cat.adicionalesItems, 'Sin adicionales facturados en el intervalo.')}</tbody>
+      </table>
+
+      <!-- 4. OTROS -->
+      <div style="font-size:10px; font-weight:900; margin:14px 0 3px; padding:3px 8px; background:#f1f5f9; color:#334155; border-left:3px solid #64748b;">
+        4. SERVICIOS Y DELIVERY
+      </div>
+      <table>
+        <thead><tr><th>Concepto</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <tbody>${renderRows(cat.otrosItems, 'Sin servicios de delivery facturados.')}</tbody>
+      </table>
+
+      <div class="total-box" style="margin-top:14px; background:#ecfdf5; border-color:#059669;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div class="total-label" style="color:#065f46; font-size:10px;">UNIDADES FACTURADAS:</div>
+            <div style="font-size:14px; font-weight:900; color:#111827;">${cat.totalUnits} unidades</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="total-label" style="color:#065f46; font-size:10px;">TOTAL FACTURADO EN ÍTEMS:</div>
+            <div class="total-val" style="color:#047857; font-size:16px;">$${cat.totalRevenueUSD.toFixed(2)} USD</div>
+            <div style="font-size:9px; font-weight:800; color:#065f46; margin-top:2px;">
+              (${Math.round(cat.totalRevenueCOP).toLocaleString('es-CO')} COP / ${cat.totalRevenueBs.toFixed(2)} Bs)
+            </div>
+          </div>
+        </div>
+      </div>
     `);
   }
 
-  // Alias para retrocompatibilidad
+  // Alias para compatibilidad
+  generateHotDogsSoldIntervalReport(data: ReporteIntervaloData) {
+    return this.generateProductsSoldIntervalReport(data);
+  }
+
   generatePizzasSoldIntervalReport(data: ReporteIntervaloData) {
     return this.generateProductsSoldIntervalReport(data);
   }
@@ -751,8 +1052,8 @@ export class ReportService {
     data.payments.forEach((payment) => {
       const method = payment.paymentMethod || 'Efectivo USD';
       const curr = this.paymentCurrency(method);
-      const cRate = Number(payment.copRate) || Number(data.exchangeRates?.COP) || 3950;
-      const bRate = Number(payment.bsRate) || Number(data.exchangeRates?.Bs) || 36.5;
+      const cRate = Number(payment.copRate) || Number(data.exchangeRates?.COP) || 3100;
+      const bRate = Number(payment.bsRate) || Number(data.exchangeRates?.Bs) || 3.2;
 
       const paidUSD = Number(payment.amountPaidUSD) || 0;
       let tenderUSD = Number(payment.cashTenderedUSD) || 0;
@@ -763,7 +1064,7 @@ export class ReportService {
       if (tenderUSD === 0 && tenderCOP === 0 && tenderBs === 0 && paidUSD > 0) {
         if (curr === 'USD') tenderUSD = paidUSD;
         else if (curr === 'COP') tenderCOP = paidUSD * cRate;
-        else if (curr === 'Bs') tenderBs = paidUSD * bRate;
+        else if (curr === 'Bs') tenderBs = bRate > 0 ? (paidUSD * cRate) / bRate : 0;
       }
 
       // Obtener vueltos registrados en este movimiento
@@ -838,14 +1139,14 @@ export class ReportService {
     });
 
     // Calcular Venta Neta por método y equivalente USD
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3950;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 36.5;
+    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
 
     methodTotals.forEach((val) => {
       val.netNative = val.incomeNative - val.changeNative;
       if (val.currency === 'USD') val.netUSD = val.netNative;
       else if (val.currency === 'COP') val.netUSD = val.netNative / copRateGlobal;
-      else if (val.currency === 'Bs') val.netUSD = val.netNative / bsRateGlobal;
+      else if (val.currency === 'Bs') val.netUSD = (val.netNative * bsRateGlobal) / copRateGlobal;
     });
 
 
@@ -856,111 +1157,35 @@ export class ReportService {
     const billedOrderIds = new Set(billedOrders.map((o) => o.id));
     const cashItems = data.items.filter((item) => billedOrderIds.has(item.orderId));
 
-    // Desglose de Deliverys de Comandas Facturadas
-    const deliveryTierMap = new Map<number, number>();
-    billedOrders.forEach((ord) => {
-      const fee = Number(ord.deliveryFeeUSD) || 0;
-      if (ord.type === 'delivery' || fee > 0) {
-        deliveryTierMap.set(fee, (deliveryTierMap.get(fee) || 0) + 1);
+    // Categorización unificada de ítems y deliverys facturados
+    const cat = this.categorizeReportItems(cashItems, billedOrders, copRateGlobal, bsRateGlobal);
+
+    const renderCategoryRows = (items: Array<{ name: string; quantity: number; subtotalUSD: number; subtotalCOP: number }>, emptyMsg: string) => {
+      if (items.length === 0) {
+        return `<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding:5px;">${emptyMsg}</td></tr>`;
       }
-    });
+      return items.map((item) => `
+        <tr>
+          <td><strong>${this.escapeHtml(item.name)}</strong></td>
+          <td style="text-align:center;">${item.quantity}</td>
+          <td style="text-align:right; font-weight:700;">
+            $${item.subtotalUSD.toFixed(2)} USD
+            <span style="font-size:9.5px; font-weight:normal; color:#4b5563; display:block;">
+              ${Math.round(item.subtotalCOP).toLocaleString('es-CO')} COP
+            </span>
+          </td>
+        </tr>
+      `).join('');
+    };
 
-    // Extracción de Adicionales Pagos, Toppings Gratis y Productos Base categorizados
-    const paidExtrasMap = new Map<string, { name: string; quantity: number; subtotalUSD: number; unitPrice: number }>();
-    let freeToppingsCount = 0;
-    const foodMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
-    const drinkMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
-    const othersProductMap = new Map<string, { name: string; quantity: number; subtotalUSD: number }>();
-
-    cashItems.forEach((it: any) => {
-      const itQty = Number(it.quantity) || 1;
-      const cleanName = this.getReportBaseProductName(it);
-
-      const extrasList: any[] = [];
-      if (Array.isArray(it.extras)) {
-        extrasList.push(...it.extras);
-      } else if (it.extrasJson && Array.isArray(it.extrasJson)) {
-        extrasList.push(...it.extrasJson);
-      } else if (typeof it.extrasJson === 'string') {
-        try {
-          const parsed = JSON.parse(it.extrasJson);
-          if (Array.isArray(parsed)) extrasList.push(...parsed);
-        } catch (e) {}
-      }
-
-      let paidExtrasUnitCost = 0;
-      extrasList.forEach((extra) => {
-        const price = Number(extra.price) || 0;
-        const exQty = Number(extra.quantity) || 1;
-        const rawName = (extra.name || 'Adicional').trim();
-        const cleanBaseName = rawName.replace(/^\d+x\s*/i, '').trim();
-        if (price > 0) {
-          paidExtrasUnitCost += price;
-          const unitPrice = extra.unitPrice || (price / exQty);
-          const current = paidExtrasMap.get(cleanBaseName) || { name: `ADD ${cleanBaseName}`, quantity: 0, subtotalUSD: 0, unitPrice };
-          current.quantity += itQty * exQty;
-          current.subtotalUSD += price * itQty;
-          paidExtrasMap.set(cleanBaseName, current);
-        } else {
-          freeToppingsCount += itQty * exQty;
-        }
-      });
-
-      const rawPrice = Number(it.price) || 0;
-      const baseUnitPrice = Math.max(0, rawPrice - paidExtrasUnitCost);
-      const baseSubtotal = baseUnitPrice * itQty;
-
-      const catLower = (it.category || '').toLowerCase().trim();
-      const rawLower = (it.productName || it.name || '').toLowerCase().trim();
-      const isDrink =
-        catLower.includes('bebida') ||
-        catLower.includes('drink') ||
-        catLower.includes('refresco') ||
-        catLower.includes('jugo') ||
-        catLower.includes('licor') ||
-        catLower.includes('cerveza') ||
-        catLower.includes('agua') ||
-        catLower.includes('trago') ||
-        catLower.includes('coctel') ||
-        catLower.includes('cóctel') ||
-        catLower.includes('vino') ||
-        catLower.includes('café') ||
-        catLower.includes('cafe') ||
-        catLower.includes('malta') ||
-        Boolean(it.drinkType) ||
-        Boolean(it.flavor) ||
-        rawLower.includes('refresco') ||
-        rawLower.includes('jugo') ||
-        rawLower.includes('agua') ||
-        rawLower.includes('cerveza') ||
-        rawLower.includes('nestea') ||
-        rawLower.includes('granizado') ||
-        rawLower.includes('soda') ||
-        rawLower.includes('malta') ||
-        rawLower.includes('licor') ||
-        rawLower.includes('ron') ||
-        rawLower.includes('vodka') ||
-        rawLower.includes('whisky') ||
-        rawLower.includes('mojito') ||
-        rawLower.includes('té') ||
-        rawLower.includes('te ') ||
-        rawLower.endsWith(' te');
-
-      const isOther =
-        catLower.includes('delivery') ||
-        catLower.includes('servicio') ||
-        catLower.includes('otro') ||
-        rawLower.includes('delivery') ||
-        rawLower.includes('servicio');
-
-      const targetMap = isDrink ? drinkMap : isOther ? othersProductMap : foodMap;
-      const prevProd = targetMap.get(cleanName) || { name: cleanName, quantity: 0, subtotalUSD: 0 };
-      prevProd.quantity += itQty;
-      prevProd.subtotalUSD += baseSubtotal;
-      targetMap.set(cleanName, prevProd);
-    });
-
-    const totalVentaFacturadaUSD = billedTotals.usd + (billedTotals.cop / copRateGlobal) + (billedTotals.bs / bsRateGlobal);
+    const comidasRows = renderCategoryRows(cat.comidasItems, 'Sin comidas facturadas en el intervalo.');
+    const bebidasRows = renderCategoryRows(cat.bebidasItems, 'Sin bebidas facturadas en el intervalo.');
+    const adicionalesRows = renderCategoryRows(cat.adicionalesItems, 'Sin adicionales facturados en el intervalo.');
+    const otrosRows = renderCategoryRows(cat.otrosItems, 'Sin otros conceptos facturados en el intervalo.');
+    const totalItemsUSD = cat.totalRevenueUSD;
+    const totalItemsCOP = cat.totalRevenueCOP;
+    const totalItemsBs = cat.totalRevenueBs;
+    const totalVentaFacturadaUSD = billedTotals.usd + (billedTotals.cop / copRateGlobal) + ((billedTotals.bs * bsRateGlobal) / copRateGlobal);
 
     const firstOrder = data.orders[0]?.orderNumber || 'N/A';
     const lastOrder = data.orders[data.orders.length - 1]?.orderNumber || 'N/A';
@@ -991,8 +1216,10 @@ export class ReportService {
         .filter((it) => it.orderId === ord.id)
         .map((it) => `${it.quantity}x ${this.escapeHtml(it.productName.replace(/\s*\((Grande|Pequeña|Mediana|Familiar|Estándar)\)/gi, '').trim())}`)
         .join(', ');
-      const copEquiv = roundCOP(ord.totalUSD * (ord.copRateAtPayment || copRateGlobal)).toLocaleString();
-      const bsEquiv = (ord.totalUSD * (ord.bsRateAtPayment || bsRateGlobal)).toFixed(2);
+      const ordCop = ord.totalCOP || roundCOP(ord.totalUSD * (ord.copRateAtPayment || copRateGlobal));
+      const copEquiv = ordCop.toLocaleString('es-CO');
+      const bRate = ord.bsRateAtPayment || bsRateGlobal;
+      const bsEquiv = bRate > 0 ? (ordCop / bRate).toFixed(2) : '0.00';
       return `
         <tr>
           <td><strong>#${this.escapeHtml(ord.orderNumber)}</strong></td>
@@ -1006,77 +1233,6 @@ export class ReportService {
         </tr>
       `;
     }).join('');
-
-    // Construcción estructurada en 4 Secciones: COMIDAS, BEBIDAS, ADICIONALES, OTROS
-    // 1. COMIDAS (Hamburguesas, Platos, Raciones, etc.)
-    const comidasItems: Array<{ name: string; quantity: number; subtotalUSD: number }> = Array.from(foodMap.values())
-      .filter((p) => p.quantity > 0)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    // 2. BEBIDAS (Refrescos, Jugos, Granizados, Cervezas, Té, Aguas)
-    const bebidasItems: Array<{ name: string; quantity: number; subtotalUSD: number }> = Array.from(drinkMap.values())
-      .filter((p) => p.quantity > 0)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    // 3. ADICIONALES (Adicionales Pagos y Toppings Gratis)
-    const adicionalesItems: Array<{ name: string; quantity: number; subtotalUSD: number }> = [];
-    const sortedExtras = Array.from(paidExtrasMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-    sortedExtras.forEach((extra) => {
-      if (extra.quantity > 0) {
-        adicionalesItems.push({
-          name: extra.name,
-          quantity: extra.quantity,
-          subtotalUSD: extra.subtotalUSD,
-        });
-      }
-    });
-    if (freeToppingsCount > 0) {
-      adicionalesItems.push({
-        name: 'Toppings Gratis',
-        quantity: freeToppingsCount,
-        subtotalUSD: 0,
-      });
-    }
-
-    // 4. OTROS (Deliverys por tarifa y conceptos varios)
-    const otrosItems: Array<{ name: string; quantity: number; subtotalUSD: number }> = [];
-    const sortedFees = Array.from(deliveryTierMap.keys()).sort((a, b) => a - b);
-    sortedFees.forEach((fee) => {
-      const count = deliveryTierMap.get(fee) || 0;
-      if (fee > 0 && count > 0) {
-        otrosItems.push({
-          name: `Delivery ($${fee.toFixed(2)})`,
-          quantity: count,
-          subtotalUSD: fee * count,
-        });
-      }
-    });
-    Array.from(othersProductMap.values())
-      .filter((p) => p.quantity > 0)
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .forEach((p) => otrosItems.push(p));
-
-    const unifiedItems = [...comidasItems, ...bebidasItems, ...adicionalesItems, ...otrosItems];
-    const totalItemsUSD = unifiedItems.reduce((sum, it) => sum + it.subtotalUSD, 0);
-
-    const renderCategoryRows = (items: Array<{ name: string; quantity: number; subtotalUSD: number }>, emptyMsg: string) => {
-      if (items.length === 0) {
-        return `<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding:5px;">${emptyMsg}</td></tr>`;
-      }
-      return items.map((item) => `
-        <tr>
-          <td><strong>${this.escapeHtml(item.name)}</strong></td>
-          <td style="text-align:center;">${item.quantity}</td>
-          <td style="text-align:right; font-weight:700;">$${item.subtotalUSD.toFixed(2)}</td>
-        </tr>
-      `).join('');
-    };
-
-    const comidasRows = renderCategoryRows(comidasItems, 'Sin comidas facturadas en el intervalo.');
-    const bebidasRows = renderCategoryRows(bebidasItems, 'Sin bebidas facturadas en el intervalo.');
-    const adicionalesRows = renderCategoryRows(adicionalesItems, 'Sin adicionales facturados en el intervalo.');
-    const otrosRows = renderCategoryRows(otrosItems, 'Sin otros conceptos facturados en el intervalo.');
-
     // Historial por Método de Pago (Moneda y Monto Facturado) - Excluye Efectivo USD, Efectivo COP y Crédito (este último ya detallado en Sección 4)
     const historyByMethod = Array.from(methodTotals.keys())
       .filter((method) => method !== 'Efectivo COP' && method !== 'Efectivo USD' && method !== 'Efectivo' && method !== 'Crédito')
@@ -1232,7 +1388,7 @@ export class ReportService {
 
       <!-- 6.1 COMIDAS -->
       <div style="font-size:10px; font-weight:900; margin:10px 0 3px; padding:3px 8px; background:#fef3c7; color:#92400e; border-left:3px solid #f59e0b;">
-        6.1 COMIDAS (Hamburguesas, Raciones y Acompañantes)
+        6.1 COMIDAS (Hot Dogs, Raciones y Acompañantes)
       </div>
       <table>
         <thead>
@@ -1300,7 +1456,10 @@ export class ReportService {
 
       <div class="total-box" style="margin-top:14px; background:#ecfdf5; border-color:#059669;">
         <div class="total-label" style="color:#065f46; font-size:11px;">TOTAL GENERAL FACTURADO EN ÍTEMS:</div>
-        <div class="total-val" style="color:#047857; font-size:13px;">$${totalItemsUSD.toFixed(2)} USD</div>
+        <div class="total-val" style="color:#047857; font-size:14px;">$${totalItemsUSD.toFixed(2)} USD</div>
+        <div style="font-size:9.5px; font-weight:800; color:#065f46; margin-top:2px;">
+          (${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP / ${totalItemsBs.toFixed(2)} Bs)
+        </div>
       </div>
     `;
 
@@ -1308,11 +1467,11 @@ export class ReportService {
   }
 
   public generatePreCuentaTicket(order: Order, rates: ExchangeRates) {
-    const copRate = order.copRateAtPayment || rates.COP;
-    const bsRate = order.bsRateAtPayment || rates.Bs;
-    const totalUSD = order.totalUSD || 0;
-    const totalCOP = roundCOP(totalUSD * copRate);
-    const totalBs = (totalUSD * bsRate).toFixed(2);
+    const copRate = order.copRateAtPayment || rates.COP || 3100;
+    const bsRate = order.bsRateAtPayment || rates.Bs || 3.2;
+    const totalCOP = (order as any).totalCOP || roundCOP((order.totalUSD || 0) * copRate);
+    const totalUSD = copRate > 0 ? totalCOP / copRate : (order.totalUSD || 0);
+    const totalBs = bsRate > 0 ? (totalCOP / bsRate).toFixed(2) : '0.00';
     const cleanOrderNumber = (order.orderNumber || '').toString().replace(/^#+/, '');
 
     // Renderizar cada ítem del pedido de forma sencilla y directa (excluyendo salsas, que no van en pre-cuenta)
@@ -1322,7 +1481,7 @@ export class ReportService {
       const cleanName = (it.productName || 'Producto')
         .replace(/\s*\((Grande|Pequeña|Mediana|Familiar|Estándar|Modificada|Modificado)\)/gi, '')
         .trim();
-      const lineTotalUSD = (Number(it.price) || 0) * qty;
+      const lineTotalCOP = (Number(it.price) || 0) * qty;
 
       let extrasDetail = '';
       const extrasList: any[] = [];
@@ -1342,7 +1501,7 @@ export class ReportService {
             const q = Number(e.quantity) || 1;
             const cleanName = (e.name || 'Adicional').replace(/^\d+x\s*/i, '').trim();
             const label = q > 1 ? `${q}x ${cleanName}` : cleanName;
-            return `+ ADD ${this.escapeHtml(label)} (€${(Number(e.price) * qty).toFixed(2)})`;
+            return `+ ADD ${this.escapeHtml(label)} (${Math.round(Number(e.price) * qty).toLocaleString('es-CO')} COP)`;
           }).join(', ') +
           `</div>`;
       }
@@ -1372,23 +1531,23 @@ export class ReportService {
             ${extrasDetail}
           </td>
           <td style="padding: 4px 0; text-align: right; font-weight: 800; font-size: 12px; vertical-align: top; border-bottom: 1px dashed #e5e7eb;">
-            €${lineTotalUSD.toFixed(2)}
+            ${Math.round(lineTotalCOP).toLocaleString('es-CO')} COP
           </td>
         </tr>
       `;
     }).join('');
 
-    const deliveryFee = Number(order.deliveryFeeUSD) || 0;
-    const deliveryHtml = deliveryFee > 0 ? `
+    const deliveryFeeCOP = (order as any).deliveryFeeCOP || ((Number(order.deliveryFeeUSD) || 0) * copRate);
+    const deliveryHtml = deliveryFeeCOP > 0 ? `
       <tr>
         <td style="padding: 4px 0; font-weight: 800; font-size: 12px; color: #111827; border-bottom: 1px dashed #e5e7eb;">1x Servicio Delivery</td>
-        <td style="padding: 4px 0; text-align: right; font-weight: 800; font-size: 12px; border-bottom: 1px dashed #e5e7eb;">€${deliveryFee.toFixed(2)}</td>
+        <td style="padding: 4px 0; text-align: right; font-weight: 800; font-size: 12px; border-bottom: 1px dashed #e5e7eb;">${Math.round(deliveryFeeCOP).toLocaleString('es-CO')} COP</td>
       </tr>
     ` : '';
 
     const content = `
       <div class="header" style="text-align: center; border-bottom: 2px solid #111827; padding-bottom: 4px;">
-        <div class="logo-title" style="font-size: 16px; font-weight: 900; color: #111827;">CRISPY BURGER</div>
+        <div class="logo-title" style="font-size: 16px; font-weight: 900; color: #111827;">MUGROSITO</div>
         <div style="font-size: 11px; font-weight: 900; color: #b45309; margin-top: 1px;">PRE-CUENTA / CONSUMO</div>
       </div>
 
@@ -1408,7 +1567,7 @@ export class ReportService {
         <thead>
           <tr style="border-bottom: 1px solid #9ca3af; font-size: 10px; color: #4b5563;">
             <th style="text-align: left; padding-bottom: 2px;">DESCRIPCIÓN</th>
-            <th style="text-align: right; padding-bottom: 2px;">TOTAL EUR (€)</th>
+            <th style="text-align: right; padding-bottom: 2px;">TOTAL COP</th>
           </tr>
         </thead>
         <tbody>
@@ -1421,17 +1580,17 @@ export class ReportService {
       <div class="total-box" style="margin-top: 12px; padding: 10px; background: #fffbeb; border: 2px solid #facc15; border-radius: 8px;">
         <div style="font-size: 11px; font-weight: 900; color: #78350f; text-transform: uppercase;">TOTAL A PAGAR:</div>
         <div style="font-size: 24px; font-weight: 900; color: #111827; text-align: right; line-height: 1.1;">
-          €${totalUSD.toFixed(2)} <span style="font-size: 12px; font-weight: 800;">EUR</span>
+          ${Math.round(totalCOP).toLocaleString('es-CO')} <span style="font-size: 13px; font-weight: 800;">COP</span>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 900; margin-top: 8px; padding-top: 6px; border-top: 1.5px dashed #facc15;">
-          <span style="color: #0369a1;">🇨🇴 COP: $${totalCOP.toLocaleString()}</span>
+          <span style="color: #0369a1;">🇺🇸 USD: $${totalUSD.toFixed(2)}</span>
           <span style="color: #111827;">🇻🇪 Bs: ${totalBs}</span>
         </div>
       </div>
 
       <div class="footer" style="text-align: center; margin-top: 12px; border-top: 1px dashed #9ca3af; padding-top: 8px; font-size: 10px; font-weight: 900;">
         ¡GRACIAS POR SU PREFERENCIA!<br>
-        <span style="font-size: 8.5px; font-weight: 700; color: #4b5563;">CRISPY BURGER POS</span>
+        <span style="font-size: 8.5px; font-weight: 700; color: #4b5563;">MUGROSITO POS</span>
       </div>
     `;
 

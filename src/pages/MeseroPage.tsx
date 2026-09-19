@@ -60,7 +60,7 @@ export const MeseroPage: React.FC = () => {
     const tableParam = searchParams.get('table');
     if (typeParam === 'delivery') {
       setActiveOrderTarget({ type: 'delivery', title: 'Nuevo Pedido Delivery 🛵' });
-      setDeliveryFeeUSD(1.0);
+      setDeliveryFeeUSD(2000);
       setShowDeliveryConfig(true);
     } else if (typeParam === 'pickup') {
       setActiveOrderTarget({ type: 'pickup', title: 'Nuevo Pedido PickUp 🛍️' });
@@ -99,7 +99,7 @@ export const MeseroPage: React.FC = () => {
   const [printerSelectKitchenOrder, setPrinterSelectKitchenOrder] = useState<Order | null>(null);
   const [activeOrderForPay, setActiveOrderForPay] = useState<Order | null>(null);
   const [isCompactComandasView, setIsCompactComandasView] = useState<boolean>(() => {
-    return localStorage.getItem('crispy_mesero_view_mode') !== 'expanded';
+    return localStorage.getItem('mugrosito_mesero_view_mode') !== 'expanded';
   });
   const [expandedOrderIds, setExpandedOrderIds] = useState<string[]>([]);
   const toggleExpandOrder = (orderId: string) => {
@@ -126,7 +126,14 @@ export const MeseroPage: React.FC = () => {
 
   const availableFreeToppings = useMemo(() => {
     return ingredients
-      .filter((i) => (i.ingredientType === 'gratis' || i.category === 'Gratis') && (!i.shift || i.shift === 'ambos' || i.shift === userSession?.shift))
+      .filter(
+        (i) =>
+          (i.ingredientType?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'gratis' ||
+            i.category?.toLowerCase() === 'toppings gratis') &&
+          (!i.shift || i.shift === 'ambos' || i.shift === userSession?.shift) &&
+          i.available !== false
+      )
       .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
   }, [ingredients, userSession?.shift]);
 
@@ -156,7 +163,7 @@ export const MeseroPage: React.FC = () => {
     setCartItems([]);
     setCustomerName('');
     setKitchenNotes('');
-    setDeliveryFeeUSD(type === 'delivery' ? 1.0 : 0);
+    setDeliveryFeeUSD(type === 'delivery' ? 2000 : 0);
     setShowDeliveryConfig(type === 'delivery');
     setOrderError(null);
   };
@@ -253,7 +260,7 @@ export const MeseroPage: React.FC = () => {
       id: item.productId,
       name: item.productName,
       price: estimatedBasePrice,
-      category: item.category || 'Hamburguesas',
+      category: item.category || 'Hot Dogs',
       baseIngredients: [],
     } as Product;
 
@@ -318,7 +325,7 @@ export const MeseroPage: React.FC = () => {
     }
 
     if (list.some((c) => c.isDelivery) && deliveryFeeUSD <= 0) {
-      setDeliveryFeeUSD(1.0);
+      setDeliveryFeeUSD(2000);
     }
   };
 
@@ -369,7 +376,7 @@ export const MeseroPage: React.FC = () => {
     }
 
     if (list.some((c) => c.isDelivery) && deliveryFeeUSD <= 0) {
-      setDeliveryFeeUSD(1.0);
+      setDeliveryFeeUSD(2000);
     }
   };
 
@@ -412,7 +419,7 @@ export const MeseroPage: React.FC = () => {
 
       const stillHasDelivery = next.some((i) => i.isDelivery);
       if (mode === 'delivery') {
-        if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+        if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
         setShowDeliveryConfig(true);
       } else if (!stillHasDelivery && activeOrderTarget?.type !== 'delivery') {
         setDeliveryFeeUSD(0);
@@ -432,7 +439,7 @@ export const MeseroPage: React.FC = () => {
       }))
     );
     if (isDelivery) {
-      if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+      if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
       setShowDeliveryConfig(true);
     } else {
       if (activeOrderTarget?.type !== 'delivery') {
@@ -457,7 +464,7 @@ export const MeseroPage: React.FC = () => {
         return;
       }
       if (effectiveDeliveryFee <= 0) {
-        setOrderError('⚠️ Debe seleccionar o ingresar el costo del Delivery (mínimo $0.50).');
+        setOrderError('⚠️ Debe seleccionar o ingresar el costo del Delivery (mínimo 1.000 COP).');
         setShowDeliveryConfig(true);
         return;
       }
@@ -472,14 +479,20 @@ export const MeseroPage: React.FC = () => {
     setOrderError(null);
 
     try {
+      const copRate = exchangeRates?.COP || 3100;
+      const totalUSDCalc = copRate > 0 ? (cartTotalUSD / copRate) : 0;
+      const deliveryUSDCalc = copRate > 0 ? (effectiveDeliveryFee / copRate) : 0;
+
       await createOrder({
         type: activeOrderTarget.type,
         tableNumber: activeOrderTarget.tableNumber,
         customerName: customerName.trim() || undefined,
         kitchenNotes: getCleanItemNote(kitchenNotes) || undefined,
         items: cartItems,
-        totalUSD: cartTotalUSD,
-        deliveryFeeUSD: effectiveDeliveryFee,
+        totalUSD: totalUSDCalc,
+        totalCOP: cartTotalUSD,
+        deliveryFeeUSD: deliveryUSDCalc,
+        deliveryFeeCOP: effectiveDeliveryFee,
         shift: userSession?.shift || 'ambos',
         targetPrinter,
       } as any);
@@ -557,7 +570,7 @@ export const MeseroPage: React.FC = () => {
                 onClick={() => {
                   const next = !isCompactComandasView;
                   setIsCompactComandasView(next);
-                  localStorage.setItem('crispy_mesero_view_mode', next ? 'compact' : 'expanded');
+                  localStorage.setItem('mugrosito_mesero_view_mode', next ? 'compact' : 'expanded');
                 }}
                 className={`px-2.5 py-1 rounded-lg font-black text-[11px] flex items-center gap-1 border transition-all cursor-pointer shadow-xs ${
                   isCompactComandasView
@@ -630,15 +643,24 @@ export const MeseroPage: React.FC = () => {
                           </div>
 
                           <div className="py-2 space-y-1 text-center flex flex-col items-center justify-center">
-                            <div className="text-base sm:text-lg font-black text-black leading-none">
-                              ${ord.totalUSD.toFixed(2)} <span className="text-[11px] font-bold text-gray-500">USD</span>
-                            </div>
-                            <div className="text-xs font-bold text-gray-700 truncate">
-                              🇨🇴 ${roundCOP(ord.totalUSD * exchangeRates.COP).toLocaleString()}
-                            </div>
-                            <div className="text-xs font-bold text-gray-700 truncate">
-                              🇻🇪 {(ord.totalUSD * exchangeRates.Bs).toFixed(2)} Bs
-                            </div>
+                            {(() => {
+                              const totalCOP = ord.totalCOP || roundCOP(ord.totalUSD * exchangeRates.COP);
+                              const totalUSD = ord.totalCOP ? (ord.totalCOP / (exchangeRates.COP || 3100)) : ord.totalUSD;
+                              const totalBs = ord.totalCOP ? (ord.totalCOP / (exchangeRates.Bs || 3.2)) : ((ord.totalUSD * (exchangeRates.COP || 3100)) / (exchangeRates.Bs || 3.2));
+                              return (
+                                <>
+                                  <div className="text-base sm:text-lg font-black text-black leading-none">
+                                    {Math.round(totalCOP).toLocaleString('es-CO')} <span className="text-[11px] font-bold text-gray-500">COP</span>
+                                  </div>
+                                  <div className="text-xs font-bold text-gray-700 truncate">
+                                    🇺🇸 ${totalUSD.toFixed(2)} USD
+                                  </div>
+                                  <div className="text-xs font-bold text-gray-700 truncate">
+                                    🇻🇪 {totalBs.toFixed(2)} Bs
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       );
@@ -684,7 +706,7 @@ export const MeseroPage: React.FC = () => {
                           {/* Items summary */}
                           <div className="my-1.5 py-1.5 px-2 rounded-xl bg-gray-50 border border-gray-100 text-center">
                             <div className="text-xs sm:text-sm font-black text-yellow-900">
-                              🍔 {itemsCount} {itemsCount === 1 ? 'ítem' : 'ítems'}
+                              🌭 {itemsCount} {itemsCount === 1 ? 'ítem' : 'ítems'}
                             </div>
                             <p className="text-xs text-gray-700 font-medium text-center truncate mt-0.5" title={itemsSummary}>
                               {itemsSummary}
@@ -703,7 +725,7 @@ export const MeseroPage: React.FC = () => {
                               {isReady ? '¡LISTA!' : 'EN PREP.'}
                             </span>
                             <span className="text-black font-black text-sm sm:text-base">
-                              ${ord.totalUSD.toFixed(2)} USD
+                              {Math.round(ord.totalCOP || (ord.totalUSD * exchangeRates.COP)).toLocaleString('es-CO')} COP
                             </span>
                           </div>
                         </div>
@@ -803,7 +825,9 @@ export const MeseroPage: React.FC = () => {
                                   {it.quantity}x {it.productName}
                                 </span>
                                 <span className="text-black font-bold shrink-0 ml-1">
-                                  ${(it.price * it.quantity).toFixed(2)}
+                                  {it.price >= 100
+                                    ? `${Math.round(it.price * it.quantity).toLocaleString('es-CO')} COP`
+                                    : `$${(it.price * it.quantity).toFixed(2)}`}
                                 </span>
                               </div>
                             ))}
@@ -813,7 +837,7 @@ export const MeseroPage: React.FC = () => {
                         {/* Actions */}
                         <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-1.5">
                           <span className="text-sm sm:text-base font-black text-black">
-                            ${ord.totalUSD.toFixed(2)} USD
+                            {Math.round(ord.totalCOP || (ord.totalUSD * exchangeRates.COP)).toLocaleString('es-CO')} COP
                           </span>
 
                           <div className="flex items-center gap-1.5">
@@ -878,7 +902,7 @@ export const MeseroPage: React.FC = () => {
                   {activeOrderTarget.title}
                 </h3>
                 <span className="text-[11px] text-gray-500 font-bold uppercase">
-                  Selección de Hamburguesas, Bebidas y Acompañantes
+                  Selección de Hot Dogs, Bebidas y Acompañantes
                 </span>
               </div>
             </div>
@@ -1007,7 +1031,7 @@ export const MeseroPage: React.FC = () => {
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-xs font-black text-blue-950 uppercase">DELIVERY ACTIVO</span>
                             <span className="text-[11px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-md">
-                              +${effectiveDeliveryFee.toFixed(2)} USD
+                              +{Math.round(effectiveDeliveryFee).toLocaleString('es-CO')} COP
                             </span>
                           </div>
                           <span className="text-[11px] font-bold text-blue-800 truncate block mt-0.5">
@@ -1125,7 +1149,7 @@ export const MeseroPage: React.FC = () => {
                                   type="button"
                                   onClick={() => {
                                     setItemPackaging(item.id, 'delivery');
-                                    if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(1.0);
+                                    if (deliveryFeeUSD <= 0) setDeliveryFeeUSD(2000);
                                   }}
                                   className={`px-2 py-0.5 rounded-md text-[10px] font-black border transition-all cursor-pointer ${
                                     item.isDelivery
@@ -1147,14 +1171,14 @@ export const MeseroPage: React.FC = () => {
                                   </span>
                                 ) : (
                                   <span className="text-[10px] font-bold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded-md inline-block">
-                                    🍔 Entera
+                                    🌭 Entero
                                   </span>
                                 )}
                               </div>
                             </div>
 
                             <span className="text-sm sm:text-base font-black text-black shrink-0">
-                              ${(item.price * item.quantity).toFixed(2)}
+                              {Math.round(item.price * item.quantity).toLocaleString('es-CO')} COP
                             </span>
                           </div>
 
@@ -1178,7 +1202,7 @@ export const MeseroPage: React.FC = () => {
                               {item.extras.map((ex, exIdx) => (
                                 <div key={exIdx} className="flex justify-between">
                                   <span>➕ ADD: {(ex.quantity && ex.quantity > 1) ? `${ex.quantity}x ` : ''}{ex.name}</span>
-                                  {ex.price > 0 && <span className="font-black text-emerald-700">+${ex.price.toFixed(2)}</span>}
+                                  {ex.price > 0 && <span className="font-black text-emerald-700">+{Math.round(ex.price).toLocaleString('es-CO')} COP</span>}
                                 </div>
                               ))}
                             </div>
@@ -1258,13 +1282,13 @@ export const MeseroPage: React.FC = () => {
                   <div className="bg-white p-3 rounded-2xl border border-gray-200 space-y-1 shadow-xs">
                     <div className="flex justify-between text-xs sm:text-sm font-bold text-gray-600">
                       <span>Subtotal Ítems:</span>
-                      <span className="text-black font-black">${itemsSubtotalUSD.toFixed(2)} USD</span>
+                      <span className="text-black font-black">{Math.round(itemsSubtotalUSD).toLocaleString('es-CO')} COP</span>
                     </div>
 
                     {effectiveDeliveryFee > 0 && (
                       <div className="flex justify-between text-xs sm:text-sm font-bold text-gray-600">
                         <span>Costo Delivery:</span>
-                        <span className="text-black font-black">+${effectiveDeliveryFee.toFixed(2)} USD</span>
+                        <span className="text-black font-black">+{Math.round(effectiveDeliveryFee).toLocaleString('es-CO')} COP</span>
                       </div>
                     )}
 
@@ -1272,10 +1296,10 @@ export const MeseroPage: React.FC = () => {
                       <span className="text-xs sm:text-sm font-black text-gray-900 uppercase">Total a Pagar:</span>
                       <div className="text-right">
                         <span className="text-xl sm:text-2xl font-black text-black block leading-none">
-                          ${cartTotalUSD.toFixed(2)} USD
+                          {Math.round(cartTotalUSD).toLocaleString('es-CO')} COP
                         </span>
                         <span className="text-xs text-gray-600 font-bold block mt-1">
-                          ≈ ${(cartTotalUSD * exchangeRates.COP).toLocaleString()} COP | {(cartTotalUSD * exchangeRates.Bs).toFixed(2)} Bs
+                          ≈ ${(exchangeRates.COP > 0 ? cartTotalUSD / exchangeRates.COP : 0).toFixed(2)} USD | {(exchangeRates.Bs > 0 ? cartTotalUSD / exchangeRates.Bs : 0).toFixed(2)} Bs
                         </span>
                       </div>
                     </div>
@@ -1340,7 +1364,7 @@ export const MeseroPage: React.FC = () => {
           </div>
       )}
 
-      {/* MODAL 2: CONFIGURADOR DE HAMBURGUESAS (Solo fallback si no hay activeOrderTarget) */}
+      {/* MODAL 2: CONFIGURADOR DE HOT DOGS (Solo fallback si no hay activeOrderTarget) */}
       {!activeOrderTarget && (
         <BurgerBuilderModal
           burger={selectedBurger}
@@ -1439,6 +1463,7 @@ export const MeseroPage: React.FC = () => {
           onClose={() => setOrderEditModalOrder(null)}
           products={products}
           ingredients={ingredients}
+          exchangeRates={exchangeRates}
           onSaveEdit={async (orderId, payload) => {
             await editOrder(orderId, {
               ...payload,

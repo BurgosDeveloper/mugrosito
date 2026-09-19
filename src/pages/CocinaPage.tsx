@@ -287,7 +287,7 @@ export const CocinaPage: React.FC = () => {
                                 </span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 border border-slate-300 text-[9px] font-black">
-                                  🍔 ENTERA
+                                  🌭 ENTERO
                                 </span>
                               )}
                             </div>

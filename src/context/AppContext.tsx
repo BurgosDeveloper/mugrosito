@@ -188,10 +188,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         window.localStorage.removeItem('basilico_user_session');
         window.localStorage.removeItem('crispy_user_session');
+        window.localStorage.removeItem('mugrosito_user_session');
       } catch (e) {}
 
       if (typeof window.sessionStorage !== 'undefined') {
-        const saved = window.sessionStorage.getItem('crispy_user_session');
+        const saved = window.sessionStorage.getItem('mugrosito_user_session') || window.sessionStorage.getItem('crispy_user_session');
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
@@ -241,7 +242,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [exchangeRates, setExchangeRates] = useState<ExchangeRates>({ COP: 3950, Bs: 36.50 });
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRates>({ COP: 3100, Bs: 3.20 });
   
   const [cajaChicaApertura, setCajaChicaApertura] = useState<CajaChicaApertura>({ usdCash: 0, copCash: 0 });
   const [cajaChicaTransactions, setCajaChicaTransactions] = useState<CajaChicaTransaction[]>([]);
@@ -251,11 +252,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUserSession(null);
     if (typeof window !== 'undefined') {
       if (typeof window.sessionStorage !== 'undefined') {
+        window.sessionStorage.removeItem('mugrosito_user_session');
         window.sessionStorage.removeItem('crispy_user_session');
       }
       try {
         window.localStorage.removeItem('basilico_user_session');
         window.localStorage.removeItem('crispy_user_session');
+        window.localStorage.removeItem('mugrosito_user_session');
       } catch (e) {}
     }
   }, []);
@@ -264,6 +267,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const headers = new Headers(options.headers);
     if (userSession?.sessionToken) {
       headers.set('Authorization', `Bearer ${userSession.sessionToken}`);
+      headers.set('x-mugrosito-token', userSession.sessionToken);
       headers.set('x-crispy-token', userSession.sessionToken);
       headers.set('x-basilico-session', userSession.sessionToken);
     }
@@ -357,11 +361,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setUserSession(session);
           if (typeof window !== 'undefined') {
             if (typeof window.sessionStorage !== 'undefined') {
-              window.sessionStorage.setItem('crispy_user_session', JSON.stringify(session));
+              window.sessionStorage.setItem('mugrosito_user_session', JSON.stringify(session));
+              window.sessionStorage.removeItem('crispy_user_session');
             }
             try {
               window.localStorage.removeItem('basilico_user_session');
               window.localStorage.removeItem('crispy_user_session');
+              window.localStorage.removeItem('mugrosito_user_session');
             } catch (e) {}
           }
           return { success: true, user: session };

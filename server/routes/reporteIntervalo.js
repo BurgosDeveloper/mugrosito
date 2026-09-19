@@ -102,7 +102,7 @@ module.exports = function (io) {
       let itemRows = [];
       if (orderIds.length > 0) {
         const { rows } = await query(
-          `SELECT oi.*, o.order_number, COALESCE(NULLIF(oi.category, ''), p.category, 'Sin categoría') AS category FROM order_items oi
+          `SELECT oi.*, o.order_number, o.total_usd, o.total_cop, o.cop_rate_at_payment, o.bs_rate_at_payment, COALESCE(NULLIF(oi.category, ''), p.category, 'Sin categoría') AS category FROM order_items oi
            JOIN orders o ON o.id = oi.order_id
            LEFT JOIN products p ON (p.id = oi.product_id OR LOWER(p.name) = LOWER(oi.product_name))
            WHERE oi.order_id = ANY($1::text[])`,
@@ -111,7 +111,7 @@ module.exports = function (io) {
         itemRows = rows;
       }
 
-      // 3. Pagos de esas órdenes
+      // 3. Pagos de esas órdenes (excluyendo comandas canceladas)
       let paymentRows = [];
       if (orderIds.length > 0) {
         const { rows } = await query(
@@ -121,6 +121,7 @@ module.exports = function (io) {
              (op.created_at >= $1 AND op.created_at <= $2)
              OR op.order_id = ANY($3::text[])
            )
+           AND o.status != 'cancelado'
            ${req.user.shift === 'ambos' ? '' : 'AND o.shift = $4'}
            ORDER BY op.created_at ASC`,
           req.user.shift === 'ambos' ? [fromClean, toClean, orderIds] : [fromClean, toClean, orderIds, req.user.shift]
@@ -131,6 +132,7 @@ module.exports = function (io) {
           `SELECT op.*, o.order_number FROM order_payments op
            JOIN orders o ON o.id = op.order_id
            WHERE op.created_at >= $1 AND op.created_at <= $2
+           AND o.status != 'cancelado'
            ${req.user.shift === 'ambos' ? '' : 'AND o.shift = $3'}
            ORDER BY op.created_at ASC`,
           shiftParams
@@ -195,8 +197,8 @@ module.exports = function (io) {
         `SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = $1`,
         [req.user.shift]
       );
-      const copRate = Number(rateRows[0]?.cop_rate) || 3950;
-      const bsRate = Number(rateRows[0]?.bs_rate) || 36.5;
+      const copRate = Number(rateRows[0]?.cop_rate) || 3100;
+      const bsRate = Number(rateRows[0]?.bs_rate) || 3.2;
 
       // 7. Fondo de apertura de caja chica para el turno
       const { rows: aperturaRows } = await query(
@@ -220,8 +222,10 @@ module.exports = function (io) {
         paymentStatus: ord.payment_status,
         paymentMethod: ord.payment_method,
         totalUSD: parseFloat(ord.total_usd) || 0,
+        totalCOP: parseFloat(ord.total_cop) || ((parseFloat(ord.total_usd) || 0) * (parseFloat(ord.cop_rate_at_payment) || copRate)),
         paidAmountUSD: parseFloat(ord.paid_amount_usd) || 0,
         deliveryFeeUSD: parseFloat(ord.delivery_fee_usd) || 0,
+        deliveryFeeCOP: parseFloat(ord.delivery_fee_cop) || ((parseFloat(ord.delivery_fee_usd) || 0) * (parseFloat(ord.cop_rate_at_payment) || copRate)),
         copRateAtPayment: parseFloat(ord.cop_rate_at_payment) || copRate,
         bsRateAtPayment: parseFloat(ord.bs_rate_at_payment) || bsRate,
         createdAt: ord.created_at,
@@ -242,22 +246,58 @@ module.exports = function (io) {
             halfDetails = typeof it.half_details === 'string' ? JSON.parse(it.half_details) : it.half_details;
           }
         } catch (e) {}
+
+        const rawPrice = parseFloat(it.price) || 0;
+        const ordCopRate = parseFloat(it.cop_rate_at_payment) || copRate;
+        const ordBsRate = parseFloat(it.bs_rate_at_payment) || bsRate;
+        const isRawInCOP = rawPrice >= 100;
+        const priceCOP = isRawInCOP ? rawPrice : Math.round(rawPrice * ordCopRate);
+        const priceUSD = isRawInCOP ? (ordCopRate > 0 ? Number((rawPrice / ordCopRate).toFixed(4)) : rawPrice) : rawPrice;
+
+        const normalizedExtras = (Array.isArray(extras) ? extras : []).map((ex) => {
+          const exRaw = parseFloat(ex.price) || 0;
+          const exIsCOP = exRaw >= 100;
+          const exCOP = exIsCOP ? exRaw : Math.round(exRaw * ordCopRate);
+          const exUSD = exIsCOP ? (ordCopRate > 0 ? Number((exRaw / ordCopRate).toFixed(4)) : exRaw) : exRaw;
+          return {
+            ...ex,
+            price: exRaw,
+            priceCOP: exCOP,
+            priceUSD: exUSD,
+          };
+        });
+
         return {
           id: it.id,
           orderId: it.order_id,
           orderNumber: String(it.order_number || '').replace(/^#+/, ''),
+          productId: it.product_id,
           productName: it.product_name,
-          price: parseFloat(it.price) || 0,
+          price: rawPrice,
+          priceUSD,
+          priceCOP,
+          copRate: ordCopRate,
+          bsRate: ordBsRate,
           quantity: it.quantity || 1,
           category: it.category || 'Sin categoría',
           drinkType: it.drink_type,
           flavor: it.flavor || undefined,
           sugarPreference: it.sugar_preference || undefined,
           isTakeaway: !!it.is_takeaway,
+          isDelivery: !!it.is_delivery,
           notes: it.notes || '',
           isHalfHalf: !!it.is_half_half,
           halfDetails,
-          extras,
+          extras: normalizedExtras,
+          extrasJson: normalizedExtras,
+          proteins: it.proteins || [],
+          defaultProteins: it.default_proteins || [],
+          removedIngredients: it.removed_ingredients || [],
+          isPaidIndividually: !!it.is_paid_individually,
+          paidByName: it.paid_by_name || undefined,
+          size: it.size || 'Estándar',
+          isCut: !!it.is_cut,
+          cutPreference: it.cut_preference || undefined,
         };
       });
 

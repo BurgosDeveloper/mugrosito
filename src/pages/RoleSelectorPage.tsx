@@ -21,11 +21,11 @@ export const RoleSelectorPage: React.FC = () => {
       path: '/mesonero',
       title: 'Módulo Mesero',
       badgeTitle: 'Toma de Comandas',
-      subtitle: 'Tarjetas táctiles de Mesas, Delivery y PickUp. Menú modal de hamburguesas, bebidas y adicionales.',
+      subtitle: 'Tarjetas táctiles de Mesas, Delivery y PickUp. Menú modal de hot dogs, bebidas y adicionales.',
       icon: <IoRestaurant className="text-4xl text-yellow-600" />,
       highlights: [
         'Selección directa de Mesa, Delivery o PickUp',
-        'Configurador táctil de hamburguesas con toppings',
+        'Configurador táctil de hot dogs con toppings',
         'Sincronización WebSocket en tiempo real',
       ],
     },
@@ -46,12 +46,12 @@ export const RoleSelectorPage: React.FC = () => {
       path: '/cocina',
       title: 'Módulo Cocina KDS',
       badgeTitle: 'Kitchen Display',
-      subtitle: 'Monitor visual de comandas de hamburguesas sin cortes de texto, temporizador y alertas sonoras.',
+      subtitle: 'Monitor visual de comandas de hot dogs sin cortes de texto, temporizador y alertas sonoras.',
       icon: <IoFlame className="text-4xl text-yellow-600" />,
       badgeCount: pendingKdsCount,
       highlights: [
         'Alertas de sonido por nuevas comandas',
-        'Detalle de ingredientes, adicionales y puntos de carne',
+        'Detalle de ingredientes y adicionales',
         'Notificación instantánea a Mesero y Caja al estar lista',
       ],
     },
@@ -65,7 +65,7 @@ export const RoleSelectorPage: React.FC = () => {
           <div className="w-24 h-24 rounded-3xl bg-white border-2 border-yellow-400 p-2 flex items-center justify-center shadow-lg transform hover:scale-105 transition-all overflow-hidden">
             <img
               src="/logo_default.png"
-              alt="Crispy Burger"
+              alt="Mugrosito"
               className="w-full h-full object-contain"
               onError={(e) => { (e.target as HTMLImageElement).src = '/icon.png'; }}
             />
@@ -73,7 +73,7 @@ export const RoleSelectorPage: React.FC = () => {
         </div>
 
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400/20 border border-yellow-500/40 text-black text-xs font-black uppercase tracking-widest shadow-xs">
-          <span>CRISPY BURGER REALTIME POS</span>
+          <span>MUGROSITO REALTIME POS</span>
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-gray-900">

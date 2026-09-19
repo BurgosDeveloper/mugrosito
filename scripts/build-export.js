@@ -47,25 +47,31 @@ function convertPngToIco(pngBuffer) {
 }
 
 // 1. Asegurar icono de Crispy Burger en formato PNG y formato ICO válido de Windows
+// 1. Asegurar icono de Mugrosito en formato PNG y formato ICO válido de Windows
 const srcIcon = path.join(assetsDir, 'icon.png');
-const exportPngIcon = path.join(exportDir, 'crispy_icon.png');
-const exportIcoIcon = path.join(exportDir, 'crispy_icon.ico');
+const exportPngIcon = path.join(exportDir, 'mugrosito_icon.png');
+const exportIcoIcon = path.join(exportDir, 'mugrosito_icon.ico');
+const fallbackPngIcon = path.join(exportDir, 'crispy_icon.png');
+const fallbackIcoIcon = path.join(exportDir, 'crispy_icon.ico');
 const legacyPngIcon = path.join(exportDir, 'pizza_icon.png');
 const legacyIcoIcon = path.join(exportDir, 'pizza_icon.ico');
 
 if (fs.existsSync(srcIcon)) {
   const pngBuffer = fs.readFileSync(srcIcon);
   fs.writeFileSync(exportPngIcon, pngBuffer);
+  fs.writeFileSync(fallbackPngIcon, pngBuffer);
   fs.writeFileSync(legacyPngIcon, pngBuffer);
   const icoBuffer = convertPngToIco(pngBuffer);
   fs.writeFileSync(exportIcoIcon, icoBuffer);
+  fs.writeFileSync(fallbackIcoIcon, icoBuffer);
   fs.writeFileSync(legacyIcoIcon, icoBuffer);
 }
 
 // 2. Generar archivos ejecutables VBS y BAT que abren el POS con la IP LAN vigente.
+const mugrositoVbsPath = path.join(exportDir, 'MugrositoPOS.vbs');
 const crispyVbsPath = path.join(exportDir, 'CrispyPOS.vbs');
 const vbsContent = `' =========================================================
-' CRISPY BURGER POS - EJECUTABLE DE ESCRITORIO PC
+' MUGROSITO POS - EJECUTABLE DE ESCRITORIO PC
 ' =========================================================
 Set WshShell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -73,18 +79,21 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 strPath = fso.GetParentFolderName(WScript.ScriptFullName)
 strRoot = fso.GetParentFolderName(strPath)
 
-' El lanzador Node espera el backend y abre Chrome con su IP LAN actual.
+' El lanzador Node espera el backend y abre el navegador con su IP LAN actual.
 WshShell.Run "cmd /c cd /d """ & strRoot & """ && node scripts\\launch-pos.js", 0, False
 `;
+fs.writeFileSync(mugrositoVbsPath, vbsContent);
 fs.writeFileSync(crispyVbsPath, vbsContent);
 
 // Generar también script .BAT de inicio directo con consola
+const mugrositoBatPath = path.join(exportDir, 'MugrositoPOS_Con_Consola.bat');
 const crispyBatPath = path.join(exportDir, 'CrispyPOS_Con_Consola.bat');
 const batContent = `@echo off
-title SERVIDOR & POS CRISPY BURGER
+title SERVIDOR & POS MUGROSITO
 cd /d "%~dp0.."
 node scripts\\launch-pos.js
 `;
+fs.writeFileSync(mugrositoBatPath, batContent);
 fs.writeFileSync(crispyBatPath, batContent);
 
 // 3. Crear accesos directos actualizados para export/ y el Escritorio de Windows.
@@ -93,7 +102,7 @@ const psScriptContent = `
 $WshShell = New-Object -ComObject WScript.Shell
 $desktopDir = [Environment]::GetFolderPath('Desktop')
 
-# Eliminar accesos directos legados de Basilico si existen
+# Eliminar accesos directos legados si existen
 $legacyShortcuts = @(
   "${exportDir.replace(/\\/g, '\\\\')}\\Basilico Pizzeria.lnk",
   "${exportDir.replace(/\\/g, '\\\\')}\\BasilicoPOS.vbs",
@@ -107,8 +116,9 @@ foreach ($legacy in $legacyShortcuts) {
 }
 
 $shortcutConfigs = @(
-  @{ Path = "${exportDir.replace(/\\/g, '\\\\')}\\Crispy Burger.lnk"; Target = "${crispyVbsPath.replace(/\\/g, '\\\\')}"; Desc = "Crispy Burger - Sistema POS & KDS" },
-  @{ Path = (Join-Path $desktopDir 'Crispy Burger.lnk'); Target = "${crispyVbsPath.replace(/\\/g, '\\\\')}"; Desc = "Crispy Burger - Sistema POS & KDS" }
+  @{ Path = "${exportDir.replace(/\\/g, '\\\\')}\\Mugrosito.lnk"; Target = "${mugrositoVbsPath.replace(/\\/g, '\\\\')}"; Desc = "Mugrosito - Sistema POS & KDS" },
+  @{ Path = (Join-Path $desktopDir 'Mugrosito.lnk'); Target = "${mugrositoVbsPath.replace(/\\/g, '\\\\')}"; Desc = "Mugrosito - Sistema POS & KDS" },
+  @{ Path = "${exportDir.replace(/\\/g, '\\\\')}\\Crispy Burger.lnk"; Target = "${mugrositoVbsPath.replace(/\\/g, '\\\\')}"; Desc = "Mugrosito POS" }
 )
 $timestamp = Get-Date
 foreach ($cfg in $shortcutConfigs) {
@@ -126,6 +136,8 @@ foreach ($cfg in $shortcutConfigs) {
 }
 
 $launcherPaths = @(
+  "${mugrositoVbsPath.replace(/\\/g, '\\\\')}",
+  "${mugrositoBatPath.replace(/\\/g, '\\\\')}",
   "${crispyVbsPath.replace(/\\/g, '\\\\')}",
   "${crispyBatPath.replace(/\\/g, '\\\\')}"
 )
@@ -150,7 +162,7 @@ try {
   }
 }
 
-const exportedLauncherPaths = [crispyVbsPath, crispyBatPath];
+const exportedLauncherPaths = [mugrositoVbsPath, mugrositoBatPath, crispyVbsPath, crispyBatPath];
 for (const launcherPath of exportedLauncherPaths) {
   if (fs.existsSync(launcherPath)) {
     const timestamp = new Date();
@@ -159,11 +171,11 @@ for (const launcherPath of exportedLauncherPaths) {
 }
 
 console.log('\n============================================================');
-console.log(' 🍔 CRISPY BURGER POS - ARCHIVOS DE EXPORTACIÓN Y EJECUTABLE');
+console.log(' 🌭 MUGROSITO POS - ARCHIVOS DE EXPORTACIÓN Y EJECUTABLE');
 console.log('============================================================');
 console.log(` 📂 Carpeta Export: ${exportDir}`);
-console.log(` 💻 Ejecutable Silencioso PC: ${crispyVbsPath}`);
-console.log(` 💻 Ejecutable Consola PC: ${crispyBatPath}`);
-console.log(` 🔗 Acceso Directo PC: ${path.join(exportDir, 'Crispy Burger.lnk')}`);
+console.log(` 💻 Ejecutable Silencioso PC: ${mugrositoVbsPath}`);
+console.log(` 💻 Ejecutable Consola PC: ${mugrositoBatPath}`);
+console.log(` 🔗 Acceso Directo PC: ${path.join(exportDir, 'Mugrosito.lnk')}`);
 console.log(` 🖼️ Icono oficial: ${exportIcoIcon}`);
 console.log('============================================================\n');

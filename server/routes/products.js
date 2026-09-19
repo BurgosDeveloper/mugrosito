@@ -27,13 +27,13 @@ module.exports = function(io) {
       if (inputId) {
         await query(
           `UPDATE products SET name = $1, category = $2, drink_type = $3, price = $4, price_small = $5, description = $6, image = $7, badge = $8, base_ingredients = $9, protein_count = $10, default_proteins = $11, flavors = $12, shift = 'ambos' WHERE id = $13`,
-          [upperName, category || 'Hamburguesas', drinkType || null, price || 0, priceSmall || null, description || '', image || '', badge || null, finalBaseIngredients, finalProteinCount, finalDefaultProteins, finalFlavors, inputId]
+          [upperName, category || 'Hot Dogs', drinkType || null, price || 0, priceSmall || null, description || '', image || '', badge || null, finalBaseIngredients, finalProteinCount, finalDefaultProteins, finalFlavors, inputId]
         );
       } else {
         await query(
           `INSERT INTO products (id, name, category, drink_type, price, price_small, description, image, badge, base_ingredients, protein_count, default_proteins, flavors, shift)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ambos')`,
-          [id, upperName, category || 'Hamburguesas', drinkType || null, price || 0, priceSmall || null, description || '', image || '', badge || null, finalBaseIngredients, finalProteinCount, finalDefaultProteins, finalFlavors]
+          [id, upperName, category || 'Hot Dogs', drinkType || null, price || 0, priceSmall || null, description || '', image || '', badge || null, finalBaseIngredients, finalProteinCount, finalDefaultProteins, finalFlavors]
         );
       }
 
@@ -58,7 +58,7 @@ module.exports = function(io) {
 
       await query(
         `UPDATE products SET name = $1, category = $2, drink_type = $3, price = $4, price_small = $5, description = $6, image = $7, badge = $8, base_ingredients = $9, protein_count = $10, default_proteins = $11, flavors = $12, shift = 'ambos' WHERE id = $13`,
-        [upperName, category || 'Hamburguesas', drinkType || null, price || 0, priceSmall || null, description || '', image || '', badge || null, finalBaseIngredients, finalProteinCount, finalDefaultProteins, finalFlavors, id]
+        [upperName, category || 'Hot Dogs', drinkType || null, price || 0, priceSmall || null, description || '', image || '', badge || null, finalBaseIngredients, finalProteinCount, finalDefaultProteins, finalFlavors, id]
       );
 
       const allProducts = await fetchAllProducts();

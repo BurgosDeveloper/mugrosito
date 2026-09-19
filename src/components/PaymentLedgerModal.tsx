@@ -10,7 +10,7 @@ import {
 } from 'react-icons/io5';
 import { useApp } from '../context/AppContext';
 import { Order, PaymentMethod } from '../data/mockData';
-import { roundCOP } from '../utils/currencyRounding';
+import { roundCOPPayment } from '../utils/currencyRounding';
 
 type Currency = 'USD' | 'COP' | 'Bs';
 type EntryType = 'payment' | 'change';
@@ -35,7 +35,7 @@ const methodsByCurrency: Record<Currency, { value: PaymentMethod; label: string 
 
 function asUSD(amount: number, currency: Currency, copRate: number, bsRate: number) {
   if (currency === 'COP') return copRate > 0 ? amount / copRate : 0;
-  if (currency === 'Bs') return bsRate > 0 ? amount / bsRate : 0;
+  if (currency === 'Bs') return (copRate > 0 && bsRate > 0) ? (amount * bsRate) / copRate : 0;
   return amount;
 }
 
@@ -69,8 +69,8 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
 
   // Form Fields
   const [entryType, setEntryType] = useState<EntryType>('payment');
-  const [currency, setCurrency] = useState<Currency>('USD');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Efectivo USD');
+  const [currency, setCurrency] = useState<Currency>('COP');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Efectivo COP');
   const [amountLocal, setAmountLocal] = useState('');
   const [payerName, setPayerName] = useState('Cliente General');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -96,8 +96,8 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
         (order.type === 'mesa' ? `Mesa #${order.tableNumber}` : 'Cliente General')
     );
     setEntryType('payment');
-    setCurrency('USD');
-    setPaymentMethod('Efectivo USD');
+    setCurrency('COP');
+    setPaymentMethod('Efectivo COP');
     setAmountLocal('');
     setError('');
     setIsCreditPromptOpen(false);
@@ -127,8 +127,14 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     : currentItems;
 
   const currentTotalUSD = liveOrder?.totalUSD ?? order?.totalUSD ?? 0;
+  const currentTotalCOP = liveOrder?.totalCOP ?? order?.totalCOP ?? Math.round(currentTotalUSD * exchangeRates.COP);
+  const scopedItemsCOP = scopedItems.reduce(
+    (total: number, item: Order['items'][number]) => total + (item.price || 0) * (item.quantity || 1),
+    0
+  );
+  const scopeTotalCOP = paymentScope ? scopedItemsCOP : currentTotalCOP;
   const scopeTotalUSD = paymentScope
-    ? scopedItems.reduce((total: number, item: Order['items'][number]) => total + item.price * item.quantity, 0)
+    ? (exchangeRates.COP > 0 ? scopedItemsCOP / exchangeRates.COP : 0)
     : currentTotalUSD;
 
   const scopedHistory = paymentScope
@@ -141,15 +147,15 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     let usd = item.cashTenderedUSD || 0;
     if ((item.cashTenderedCOP || 0) > 0) {
       if ((item.amountPaidUSD || 0) > 0 && rateCOP > 0) {
-        const requiredCOP = roundCOP((item.amountPaidUSD || 0) * rateCOP);
+        const requiredCOP = roundCOPPayment((item.amountPaidUSD || 0) * rateCOP);
         const excessCOP = Math.max(0, (item.cashTenderedCOP || 0) - requiredCOP);
         usd += (item.amountPaidUSD || 0) + (excessCOP / rateCOP);
       } else if (rateCOP > 0) {
         usd += (item.cashTenderedCOP || 0) / rateCOP;
       }
     }
-    if ((item.cashTenderedBs || 0) > 0 && rateBs > 0) {
-      usd += (item.cashTenderedBs || 0) / rateBs;
+    if ((item.cashTenderedBs || 0) > 0 && rateBs > 0 && rateCOP > 0) {
+      usd += ((item.cashTenderedBs || 0) * rateBs) / rateCOP;
     }
     return usd;
   };
@@ -160,7 +166,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     return (
       (item.changeGivenUSD || 0) +
       (rateCOP > 0 ? (item.changeGivenCOP || 0) / rateCOP : 0) +
-      (rateBs > 0 ? (item.changeGivenBs || 0) / rateBs : 0)
+      (rateBs > 0 && rateCOP > 0 ? ((item.changeGivenBs || 0) * rateBs) / rateCOP : 0)
     );
   };
 
@@ -175,7 +181,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     if ((it.cashTenderedUSD || 0) > 0) return sum + (it.cashTenderedUSD || 0) * rate;
     if ((it.cashTenderedBs || 0) > 0) {
       const rateBs = it.bsRate || exchangeRates.Bs;
-      return sum + ((it.cashTenderedBs || 0) / (rateBs || 1)) * rate;
+      return sum + (it.cashTenderedBs || 0) * rateBs;
     }
     return sum + (it.amountPaidUSD || 0) * rate;
   }, 0);
@@ -186,7 +192,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     if ((it.changeGivenUSD || 0) > 0) return sum + (it.changeGivenUSD || 0) * rate;
     if ((it.changeGivenBs || 0) > 0) {
       const rateBs = it.bsRate || exchangeRates.Bs;
-      return sum + ((it.changeGivenBs || 0) / (rateBs || 1)) * rate;
+      return sum + (it.changeGivenBs || 0) * rateBs;
     }
     return sum;
   }, 0);
@@ -194,21 +200,21 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   const totalTenderedBs = scopedHistory.reduce((sum, it) => {
     if ((it.cashTenderedBs || 0) > 0) return sum + (it.cashTenderedBs || 0);
     const rateBs = it.bsRate || exchangeRates.Bs;
-    if ((it.cashTenderedUSD || 0) > 0) return sum + (it.cashTenderedUSD || 0) * rateBs;
+    const rateCOP = it.copRate || exchangeRates.COP;
+    if ((it.cashTenderedUSD || 0) > 0) return sum + (rateBs > 0 ? ((it.cashTenderedUSD || 0) * rateCOP) / rateBs : 0);
     if ((it.cashTenderedCOP || 0) > 0) {
-      const rateCOP = it.copRate || exchangeRates.COP;
-      return sum + ((it.cashTenderedCOP || 0) / (rateCOP || 1)) * rateBs;
+      return sum + (rateBs > 0 ? (it.cashTenderedCOP || 0) / rateBs : 0);
     }
-    return sum + (it.amountPaidUSD || 0) * rateBs;
+    return sum + (rateBs > 0 ? ((it.amountPaidUSD || 0) * rateCOP) / rateBs : 0);
   }, 0);
 
   const totalChangeGivenBs = scopedHistory.reduce((sum, it) => {
     if ((it.changeGivenBs || 0) > 0) return sum + (it.changeGivenBs || 0);
     const rateBs = it.bsRate || exchangeRates.Bs;
-    if ((it.changeGivenUSD || 0) > 0) return sum + (it.changeGivenUSD || 0) * rateBs;
+    const rateCOP = it.copRate || exchangeRates.COP;
+    if ((it.changeGivenUSD || 0) > 0) return sum + (rateBs > 0 ? ((it.changeGivenUSD || 0) * rateCOP) / rateBs : 0);
     if ((it.changeGivenCOP || 0) > 0) {
-      const rateCOP = it.copRate || exchangeRates.COP;
-      return sum + ((it.changeGivenCOP || 0) / (rateCOP || 1)) * rateBs;
+      return sum + (rateBs > 0 ? (it.changeGivenCOP || 0) / rateBs : 0);
     }
     return sum;
   }, 0);
@@ -236,6 +242,11 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     }
   }, [order, pendingDebtUSD, pendingChangeUSD, entryType]);
 
+  const hasSplitPayments = !paymentScope && (
+    history.some((p) => Array.isArray(p.itemIds) && p.itemIds.length > 0) ||
+    currentItems.some((it) => it.isPaidIndividually)
+  );
+
   if (!order) return null;
 
   const changeCurrency = (nextCurrency: Currency) => {
@@ -245,18 +256,24 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   };
 
   const fillExactAmount = () => {
+    const debtInCOP = pendingDebtUSD * exchangeRates.COP;
+    const changeInCOP = Math.max(0, totalTenderedCOP - scopeTotalCOP - totalChangeGivenCOP);
     if (entryType === 'payment') {
       if (currency === 'USD') setAmountLocal(pendingDebtUSD.toFixed(2));
-      if (currency === 'COP') setAmountLocal(String(roundCOP(pendingDebtUSD * exchangeRates.COP)));
-      if (currency === 'Bs') setAmountLocal((pendingDebtUSD * exchangeRates.Bs).toFixed(2));
+      if (currency === 'COP') setAmountLocal(String(roundCOPPayment(debtInCOP)));
+      if (currency === 'Bs') setAmountLocal((exchangeRates.Bs > 0 ? debtInCOP / exchangeRates.Bs : 0).toFixed(2));
     } else {
       if (currency === 'USD') setAmountLocal(pendingChangeUSD.toFixed(2));
-      if (currency === 'COP') setAmountLocal(String(Math.round(pendingChangeUSD * exchangeRates.COP)));
-      if (currency === 'Bs') setAmountLocal((pendingChangeUSD * exchangeRates.Bs).toFixed(2));
+      if (currency === 'COP') setAmountLocal(String(Math.round(changeInCOP)));
+      if (currency === 'Bs') setAmountLocal((exchangeRates.Bs > 0 ? changeInCOP / exchangeRates.Bs : 0).toFixed(2));
     }
   };
 
   const handleRegisterEntry = async () => {
+    if (hasSplitPayments) {
+      setError('Esta comanda se está cobrando por personas. Cierra esta ventana y usa la opción "👥 X PERSONAS" para registrar los cobros individuales.');
+      return;
+    }
     const val = Number(amountLocal);
     if (!val || val <= 0 || isSubmitting) return;
 
@@ -339,7 +356,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   return createPortal(
     <div className="fixed inset-0 z-[100] flex flex-col bg-white w-full h-full max-h-screen overflow-hidden text-gray-900 select-none">
       <div className="w-full h-full flex flex-col overflow-hidden text-gray-900 border-none rounded-none shadow-none">
-        {/* Top Title Bar - CLARO OFICIAL CRISPY */}
+        {/* Top Title Bar - CLARO OFICIAL MUGROSITO */}
         <div className="bg-white text-gray-900 px-6 py-3 flex items-center justify-between shrink-0 border-b-2 border-yellow-400 shadow-xs">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="text-yellow-600 font-black text-xl">≡</span>
@@ -359,11 +376,14 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                 🍽️ Mesa #{order.tableNumber}
               </span>
             )}
-            {((order.deliveryFeeUSD || 0) > 0 || order.type === 'delivery') && (
-              <span className="text-xs sm:text-sm bg-blue-50 text-blue-900 px-3 py-1 rounded-lg font-black border border-blue-200">
-                🛵 Delivery: +${(order.deliveryFeeUSD || 0).toFixed(2)} USD
-              </span>
-            )}
+            {((order.deliveryFeeUSD || 0) > 0 || ((order as any).deliveryFeeCOP || 0) > 0 || order.type === 'delivery') && (() => {
+              const delCOP = (order as any).deliveryFeeCOP || (order.deliveryFeeUSD && order.deliveryFeeUSD >= 100 ? order.deliveryFeeUSD : Math.round((order.deliveryFeeUSD || 0) * (order.copRateAtPayment || exchangeRates.COP || 3100)));
+              return (
+                <span className="text-xs sm:text-sm bg-blue-50 text-blue-900 px-3 py-1 rounded-lg font-black border border-blue-200">
+                  🛵 Delivery: {delCOP > 0 ? `+${Math.round(delCOP).toLocaleString('es-CO')} COP` : 'Sin recargo'}
+                </span>
+              );
+            })()}
           </div>
 
           <div className="flex items-center gap-2.5">
@@ -387,95 +407,112 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
 
         {/* 3-COLUMN TOTALS (LARGE, HIGH CONTRAST) */}
         <div className="bg-stone-50 border-b border-gray-200 p-4 sm:p-6 shrink-0">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* COLUMN 1: BOLIVARES */}
-            <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
-              <div className="flex justify-between items-baseline font-bold text-gray-700">
-                <span className="text-base sm:text-lg font-black text-gray-800">Total en bolívares:</span>
-                <span className="text-2xl sm:text-3xl font-black text-black">{(scopeTotalUSD * exchangeRates.Bs).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-baseline font-bold">
-                <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
-                <span className="text-lg sm:text-xl font-black text-blue-700">{totalTenderedBs.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-baseline font-bold">
-                <span className="text-sm sm:text-base text-gray-600 font-bold">
-                  {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en bolívares:'}
-                </span>
-                <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
-                  {((pendingChangeUSD > 0.005 ? pendingChangeUSD * exchangeRates.Bs : totalChangeGivenBs)).toFixed(2)}
-                </span>
-              </div>
-            </div>
+          {(() => {
+            const scopeTotalBs = exchangeRates.Bs > 0 ? (scopeTotalCOP / exchangeRates.Bs) : 0;
+            const pendingDebtCOP = roundCOPPayment(pendingDebtUSD * exchangeRates.COP);
+            const pendingDebtBs = exchangeRates.Bs > 0 ? (pendingDebtUSD * exchangeRates.COP) / exchangeRates.Bs : 0;
+            const pendingChangeCOP = Math.max(0, totalTenderedCOP - scopeTotalCOP - totalChangeGivenCOP);
+            const pendingChangeBs = exchangeRates.Bs > 0 ? (pendingChangeCOP / exchangeRates.Bs) : 0;
 
-            {/* COLUMN 2: PESOS */}
-            <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
-              <div className="flex justify-between items-baseline font-bold text-gray-700">
-                <span className="text-base sm:text-lg font-black text-gray-800">Total en pesos:</span>
-                <span className="text-2xl sm:text-3xl font-black text-black">{roundCOP(scopeTotalUSD * exchangeRates.COP).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between items-baseline font-bold">
-                <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
-                <span className="text-lg sm:text-xl font-black text-blue-700">{Math.round(totalTenderedCOP).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between items-baseline font-bold">
-                <span className="text-sm sm:text-base text-gray-600 font-bold">
-                  {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en pesos:'}
-                </span>
-                <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
-                  {Math.round(pendingChangeUSD > 0.005 ? pendingChangeUSD * exchangeRates.COP : totalChangeGivenCOP).toLocaleString()}
-                </span>
-              </div>
-            </div>
+            return (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* COLUMN 1: PESOS (DESTACADO PRINCIPAL) */}
+                  <div className="p-4 sm:p-6 rounded-2xl bg-yellow-50/60 border-2 border-yellow-400 ring-2 ring-yellow-400/40 shadow-sm space-y-2">
+                    <div className="flex justify-between items-baseline font-bold text-gray-700">
+                      <span className="text-base sm:text-lg font-black text-gray-900">Total en pesos (COP):</span>
+                      <span className="text-2xl sm:text-3xl font-black text-black">{scopeTotalCOP.toLocaleString('es-CO')}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline font-bold">
+                      <span className="text-sm sm:text-base text-gray-700 font-bold">Abonado / Recibido:</span>
+                      <span className="text-lg sm:text-xl font-black text-blue-700">{Math.round(totalTenderedCOP).toLocaleString('es-CO')}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline font-bold">
+                      <span className="text-sm sm:text-base text-gray-700 font-bold">
+                        {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en pesos:'}
+                      </span>
+                      <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
+                        {(pendingChangeUSD > 0.005 ? pendingChangeCOP : totalChangeGivenCOP).toLocaleString('es-CO')}
+                      </span>
+                    </div>
+                  </div>
 
-            {/* COLUMN 3: DOLARES */}
-            <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
-              <div className="flex justify-between items-baseline font-bold text-gray-700">
-                <span className="text-base sm:text-lg font-black text-gray-800">Total en dólares:</span>
-                <span className="text-2xl sm:text-3xl font-black text-black">${scopeTotalUSD.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-baseline font-bold">
-                <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
-                <span className="text-lg sm:text-xl font-black text-blue-700">${(tenderedUSD > 0 ? tenderedUSD : paidUSD).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-baseline font-bold">
-                <span className="text-sm sm:text-base text-gray-600 font-bold">
-                  {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en dólares:'}
-                </span>
-                <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
-                  ${(pendingChangeUSD > 0.005 ? pendingChangeUSD : changeGivenUSD).toFixed(2)}
-                </span>
-              </div>
-            </div>
-          </div>
+                  {/* COLUMN 2: DOLARES */}
+                  <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
+                    <div className="flex justify-between items-baseline font-bold text-gray-700">
+                      <span className="text-base sm:text-lg font-black text-gray-800">Total en dólares (USD):</span>
+                      <span className="text-2xl sm:text-3xl font-black text-black">${scopeTotalUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline font-bold">
+                      <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
+                      <span className="text-lg sm:text-xl font-black text-blue-700">${(tenderedUSD > 0 ? tenderedUSD : paidUSD).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline font-bold">
+                      <span className="text-sm sm:text-base text-gray-600 font-bold">
+                        {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en dólares:'}
+                      </span>
+                      <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
+                        ${(pendingChangeUSD > 0.005 ? pendingChangeUSD : changeGivenUSD).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
 
-          {/* Pending / Settled Status Alert */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            {pendingDebtUSD > 0.01 ? (
-              <span className="text-base sm:text-lg font-black text-red-700 bg-red-50 border-2 border-red-300 px-5 py-2.5 rounded-2xl shadow-xs">
-                ⚠️ Pendiente por cobrar: ${pendingDebtUSD.toFixed(2)} USD (≈ {roundCOP(pendingDebtUSD * exchangeRates.COP).toLocaleString()} COP / {(pendingDebtUSD * exchangeRates.Bs).toFixed(2)} Bs)
-              </span>
-            ) : pendingChangeUSD > 0.01 ? (
-              <span className="text-base sm:text-lg font-black text-amber-900 bg-amber-100 border-2 border-amber-300 px-5 py-2.5 rounded-2xl animate-pulse shadow-xs">
-                💵 Vuelto pendiente por entregar: ${pendingChangeUSD.toFixed(2)} USD (≈ {Math.round(pendingChangeUSD * exchangeRates.COP).toLocaleString()} COP / {(pendingChangeUSD * exchangeRates.Bs).toFixed(2)} Bs)
-              </span>
-            ) : (
-              <span className="text-base sm:text-lg font-black text-green-800 bg-green-50 border-2 border-green-300 px-5 py-2.5 rounded-2xl shadow-xs">
-                ✅ Cuenta completamente cubierta y balanceada
-              </span>
-            )}
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {((order.deliveryFeeUSD || 0) > 0 || order.type === 'delivery') && (
-                <div className="text-xs sm:text-sm text-blue-950 font-bold bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
-                  📦 Ítems: ${((order.totalUSD || 0) - (order.deliveryFeeUSD || 0)).toFixed(2)} + 🛵 Delivery: ${(order.deliveryFeeUSD || 0).toFixed(2)} USD
+                  {/* COLUMN 3: BOLIVARES */}
+                  <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
+                    <div className="flex justify-between items-baseline font-bold text-gray-700">
+                      <span className="text-base sm:text-lg font-black text-gray-800">Total en bolívares (Bs):</span>
+                      <span className="text-2xl sm:text-3xl font-black text-black">{scopeTotalBs.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline font-bold">
+                      <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
+                      <span className="text-lg sm:text-xl font-black text-blue-700">{totalTenderedBs.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline font-bold">
+                      <span className="text-sm sm:text-base text-gray-600 font-bold">
+                        {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en bolívares:'}
+                      </span>
+                      <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
+                        {((pendingChangeUSD > 0.005 ? pendingChangeBs : totalChangeGivenBs)).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              )}
-              <div className="text-sm sm:text-base text-gray-700 font-extrabold bg-gray-100 px-4 py-2 rounded-2xl border border-gray-200">
-                Tasa COP: {exchangeRates.COP.toLocaleString()} | Tasa Bs: {exchangeRates.Bs.toFixed(2)}
-              </div>
-            </div>
-          </div>
+
+                {/* Pending / Settled Status Alert */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  {pendingDebtUSD > 0.01 ? (
+                    <span className="text-base sm:text-lg font-black text-red-700 bg-red-50 border-2 border-red-300 px-5 py-2.5 rounded-2xl shadow-xs">
+                      ⚠️ Pendiente por cobrar: {pendingDebtCOP.toLocaleString('es-CO')} COP (≈ ${pendingDebtUSD.toFixed(2)} USD / {pendingDebtBs.toFixed(2)} Bs)
+                    </span>
+                  ) : pendingChangeUSD > 0.01 ? (
+                    <span className="text-base sm:text-lg font-black text-amber-900 bg-amber-100 border-2 border-amber-300 px-5 py-2.5 rounded-2xl animate-pulse shadow-xs">
+                      💵 Vuelto pendiente por entregar: {pendingChangeCOP.toLocaleString('es-CO')} COP (≈ ${pendingChangeUSD.toFixed(2)} USD / {pendingChangeBs.toFixed(2)} Bs)
+                    </span>
+                  ) : (
+                    <span className="text-base sm:text-lg font-black text-green-800 bg-green-50 border-2 border-green-300 px-5 py-2.5 rounded-2xl shadow-xs">
+                      ✅ Cuenta completamente cubierta y balanceada
+                    </span>
+                  )}
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {((order.deliveryFeeUSD || 0) > 0 || ((order as any).deliveryFeeCOP || 0) > 0 || order.type === 'delivery') && (() => {
+                      const delCOP = (order as any).deliveryFeeCOP || (order.deliveryFeeUSD && order.deliveryFeeUSD >= 100 ? order.deliveryFeeUSD : Math.round((order.deliveryFeeUSD || 0) * (order.copRateAtPayment || exchangeRates.COP || 3100)));
+                      const totalCOP = (order as any).totalCOP || Math.round(order.totalUSD * (order.copRateAtPayment || exchangeRates.COP || 3100));
+                      const itemsCOP = Math.max(0, totalCOP - delCOP);
+                      return (
+                        <div className="text-xs sm:text-sm text-blue-950 font-bold bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+                          📦 Ítems: {itemsCOP.toLocaleString('es-CO')} COP + 🛵 Delivery: {Math.round(delCOP).toLocaleString('es-CO')} COP
+                        </div>
+                      );
+                    })()}
+                    <div className="text-sm sm:text-base text-gray-700 font-extrabold bg-gray-100 px-4 py-2 rounded-2xl border border-gray-200">
+                      Tasa USD: 1 USD = {exchangeRates.COP.toLocaleString()} COP | Tasa Bs: 1 BS = {exchangeRates.Bs.toFixed(2)} COP
+                    </div>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* Scrollable Middle: Fast Payment Entry Form & History */}
@@ -487,6 +524,24 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
             </div>
           )}
 
+          {hasSplitPayments && (
+            <div className="p-4 rounded-2xl bg-amber-100 text-amber-950 text-sm sm:text-base font-bold flex items-center justify-between gap-3 border-2 border-amber-300 shadow-sm">
+              <div className="flex items-center gap-2">
+                <IoWarningOutline className="text-2xl text-amber-700 shrink-0" />
+                <span>⚠️ Esta comanda tiene cobros individuales por personas en curso. Para evitar inconsistencias contables, debes cobrar los ítems restantes desde la opción &quot;👥 X PERSONAS&quot;.</span>
+              </div>
+              {onEditPaymentScope && (
+                <button
+                  type="button"
+                  onClick={() => onEditPaymentScope(order)}
+                  className="px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs sm:text-sm rounded-xl border border-yellow-500 shadow-xs shrink-0 cursor-pointer"
+                >
+                  IR A X PERSONAS
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Action Row: REGISTRAR LÍNEA DE PAGO / VUELTO */}
           <div className="bg-stone-50 p-5 sm:p-6 rounded-2xl border-2 border-gray-200 space-y-4 shadow-xs">
             <div className="flex items-center justify-between">
@@ -495,16 +550,36 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                 <span>REGISTRAR LÍNEA DE PAGO / VUELTO:</span>
               </span>
 
-              {((entryType === 'payment' && pendingDebtUSD > 0.01) ||
-                (entryType === 'change' && pendingChangeUSD > 0.01)) && (
-                <button
-                  type="button"
-                  onClick={fillExactAmount}
-                  className="text-sm sm:text-base bg-yellow-400 hover:bg-yellow-500 text-black px-4 py-2 rounded-xl font-black border border-yellow-500 transition-colors shadow-xs cursor-pointer"
-                >
-                  ⚡ Saldo Exacto
-                </button>
-              )}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Denomination Quick Buttons */}
+                {(currency === 'COP'
+                  ? [10000, 20000, 50000, 100000]
+                  : currency === 'USD'
+                  ? [5, 10, 20, 50]
+                  : [100, 200, 500, 1000]
+                ).map((bill) => (
+                  <button
+                    key={bill}
+                    type="button"
+                    onClick={() => setAmountLocal(String(bill))}
+                    className="text-xs sm:text-sm bg-stone-200 hover:bg-stone-300 text-stone-900 px-2.5 py-1.5 rounded-xl font-black border border-stone-300 transition-colors shadow-2xs cursor-pointer"
+                    title={`Fijar monto en ${bill} ${currency}`}
+                  >
+                    +{bill >= 1000 ? `${bill / 1000}k` : bill}
+                  </button>
+                ))}
+
+                {((entryType === 'payment' && pendingDebtUSD > 0.01) ||
+                  (entryType === 'change' && pendingChangeUSD > 0.01)) && (
+                  <button
+                    type="button"
+                    onClick={fillExactAmount}
+                    className="text-sm sm:text-base bg-yellow-400 hover:bg-yellow-500 text-black px-4 py-2 rounded-xl font-black border border-yellow-500 transition-colors shadow-xs cursor-pointer"
+                  >
+                    ⚡ Saldo Exacto
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Inputs Grid */}
@@ -673,11 +748,13 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                         ? (mov.changeGivenUSD || 0) +
                           (rateCOP > 0 ? (mov.changeGivenCOP || 0) / rateCOP : 0) +
                           (rateBs > 0 ? (mov.changeGivenBs || 0) / rateBs : 0)
-                        : (mov.amountPaidUSD || (
-                            (mov.cashTenderedUSD || 0) +
-                            (rateCOP > 0 ? (mov.cashTenderedCOP || 0) / rateCOP : 0) +
-                            (rateBs > 0 ? (mov.cashTenderedBs || 0) / rateBs : 0)
-                          ));
+                        : (mov.cashTenderedUSD || 0) > 0
+                        ? (mov.cashTenderedUSD || 0)
+                        : (mov.cashTenderedCOP || 0) > 0 && rateCOP > 0
+                        ? (mov.cashTenderedCOP || 0) / rateCOP
+                        : (mov.cashTenderedBs || 0) > 0 && rateBs > 0 && rateCOP > 0
+                        ? ((mov.cashTenderedBs || 0) * rateBs) / rateCOP
+                        : (mov.amountPaidUSD || 0);
 
                       return (
                         <tr key={mov.id} className="hover:bg-gray-50">
@@ -743,18 +820,62 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
               CANCELAR
             </button>
 
-            <button
-              type="button"
-              disabled={!isReadyToClose || isSubmitting}
-              onClick={handleFinalize}
-              className={`px-10 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider transition-all shadow-md cursor-pointer ${
-                isReadyToClose && !isSubmitting
-                  ? 'bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 active:scale-95'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-300'
-              }`}
-            >
-              {isSubmitting ? 'PROCESANDO...' : 'FINALIZAR COBRO'}
-            </button>
+            {paymentScope ? (
+              isReadyToClose ? (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleFinalize}
+                  className="px-8 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  {isSubmitting ? 'PROCESANDO...' : 'FINALIZAR COMANDA COMPLETA'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={pendingDebtUSD > 0.01 || pendingChangeUSD > 0.01 || isSubmitting}
+                  onClick={() => {
+                    onClose();
+                    if (onEditPaymentScope && order) {
+                      onEditPaymentScope(order);
+                    }
+                  }}
+                  className={`px-8 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider transition-all shadow-md cursor-pointer ${
+                    pendingDebtUSD <= 0.01 && pendingChangeUSD <= 0.01 && !isSubmitting
+                      ? 'bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 active:scale-95 animate-pulse'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-300'
+                  }`}
+                  title={
+                    pendingDebtUSD > 0.01
+                      ? 'Aún falta cubrir la deuda de estos ítems'
+                      : pendingChangeUSD > 0.01
+                      ? 'Hay vuelto pendiente por entregar'
+                      : 'Continuar cobrando a las siguientes personas'
+                  }
+                >
+                  {isSubmitting
+                    ? 'PROCESANDO...'
+                    : pendingDebtUSD > 0.01
+                    ? 'PAGO INCOMPLETO'
+                    : pendingChangeUSD > 0.01
+                    ? 'ENTREGAR VUELTO'
+                    : '👥 LISTO / COBRAR SIGUIENTE PERSONA'}
+                </button>
+              )
+            ) : (
+              <button
+                type="button"
+                disabled={!isReadyToClose || isSubmitting || hasSplitPayments}
+                onClick={handleFinalize}
+                className={`px-10 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider transition-all shadow-md cursor-pointer ${
+                  isReadyToClose && !isSubmitting && !hasSplitPayments
+                    ? 'bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 active:scale-95'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-300'
+                }`}
+              >
+                {isSubmitting ? 'PROCESANDO...' : 'FINALIZAR COBRO'}
+              </button>
+            )}
           </div>
         </div>
       </div>

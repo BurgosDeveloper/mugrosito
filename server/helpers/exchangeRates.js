@@ -5,11 +5,11 @@ async function getRatesForShift(client, shift) {
     [normalizedShift]
   );
   if (rows[0]) {
-    return { COP: Number(rows[0].cop_rate) || 3950, Bs: Number(rows[0].bs_rate) || 36.5 };
+    return { COP: Number(rows[0].cop_rate) || 3100, Bs: Number(rows[0].bs_rate) || 3.2 };
   }
 
   const { rows: legacyRows } = await client.query(`SELECT cop_rate, bs_rate FROM exchange_rates WHERE id = 1`);
-  return { COP: Number(legacyRows[0]?.cop_rate) || 3950, Bs: Number(legacyRows[0]?.bs_rate) || 36.5 };
+  return { COP: Number(legacyRows[0]?.cop_rate) || 3100, Bs: Number(legacyRows[0]?.bs_rate) || 3.2 };
 }
 
 module.exports = { getRatesForShift };
