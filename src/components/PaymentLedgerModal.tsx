@@ -219,8 +219,34 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     return sum;
   }, 0);
 
-  const pendingDebtUSD = Math.max(0, scopeTotalUSD - paidUSD);
+  // Totales de deuda y pagos en moneda base COP para evitar desvíos o errores de redondeo al convertir de ida y vuelta
+  const totalPaidNetCOP = scopedHistory.reduce((sum, it) => {
+    if ((it.cashTenderedCOP || 0) > 0) {
+      return sum + Math.max(0, (it.cashTenderedCOP || 0) - (it.changeGivenCOP || 0));
+    }
+    const rateCOP = it.copRate || exchangeRates.COP;
+    if ((it.cashTenderedUSD || 0) > 0) {
+      return sum + Math.max(0, (it.cashTenderedUSD || 0) - (it.changeGivenUSD || 0)) * rateCOP;
+    }
+    if ((it.cashTenderedBs || 0) > 0) {
+      const rateBs = it.bsRate || exchangeRates.Bs;
+      return sum + (rateBs > 0 ? (Math.max(0, (it.cashTenderedBs || 0) - (it.changeGivenBs || 0)) * rateCOP) / rateBs : 0);
+    }
+    return sum + (it.amountPaidUSD || 0) * rateCOP;
+  }, 0);
+
+  const pendingDebtCOP = scopedHistory.length === 0
+    ? scopeTotalCOP
+    : Math.max(0, scopeTotalCOP - totalPaidNetCOP);
+
+  const pendingDebtUSD = scopedHistory.length === 0
+    ? scopeTotalUSD
+    : Math.max(0, scopeTotalUSD - paidUSD);
+
+  const pendingDebtBs = exchangeRates.Bs > 0 ? (pendingDebtCOP / exchangeRates.Bs) : 0;
   const pendingChangeUSD = Math.max(0, tenderedUSD - scopeTotalUSD - changeGivenUSD);
+  const pendingChangeCOP = Math.max(0, totalTenderedCOP - scopeTotalCOP - totalChangeGivenCOP);
+  const pendingChangeBs = exchangeRates.Bs > 0 ? (pendingChangeCOP / exchangeRates.Bs) : 0;
 
   const fullOrderPaidUSD = history.reduce((total, item) => total + (item.amountPaidUSD || 0), 0);
   const fullOrderTenderedUSD = history.reduce((total, item) => total + getEntryTenderedUSD(item), 0);
@@ -230,17 +256,17 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
 
   const copToleranceUSD = exchangeRates.COP > 0 ? (1000 / exchangeRates.COP) : 0.05;
   const isReadyToClose =
-    Math.max(0, (order?.totalUSD || 0) - fullOrderPaidUSD) <= 0.05 &&
+    (Math.max(0, (order?.totalUSD || 0) - fullOrderPaidUSD) <= 0.05 || pendingDebtCOP <= 10) &&
     Math.max(0, fullOrderTenderedUSD - (order?.totalUSD || 0) - fullOrderChangeUSD) <= Math.max(0.05, copToleranceUSD);
 
   // Auto-switch to change if debt is settled but change is owed
   useEffect(() => {
     if (!order) return;
-    if (pendingDebtUSD <= 0.01 && pendingChangeUSD > 0.01 && entryType === 'payment') {
+    if ((pendingDebtUSD <= 0.01 || pendingDebtCOP <= 10) && pendingChangeUSD > 0.01 && entryType === 'payment') {
       setEntryType('change');
       setAmountLocal('');
     }
-  }, [order, pendingDebtUSD, pendingChangeUSD, entryType]);
+  }, [order, pendingDebtUSD, pendingDebtCOP, pendingChangeUSD, entryType]);
 
   const hasSplitPayments = !paymentScope && (
     history.some((p) => Array.isArray(p.itemIds) && p.itemIds.length > 0) ||
@@ -256,12 +282,11 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   };
 
   const fillExactAmount = () => {
-    const debtInCOP = pendingDebtUSD * exchangeRates.COP;
     const changeInCOP = Math.max(0, totalTenderedCOP - scopeTotalCOP - totalChangeGivenCOP);
     if (entryType === 'payment') {
       if (currency === 'USD') setAmountLocal(pendingDebtUSD.toFixed(2));
-      if (currency === 'COP') setAmountLocal(String(roundCOPPayment(debtInCOP)));
-      if (currency === 'Bs') setAmountLocal((exchangeRates.Bs > 0 ? debtInCOP / exchangeRates.Bs : 0).toFixed(2));
+      if (currency === 'COP') setAmountLocal(String(Math.round(pendingDebtCOP)));
+      if (currency === 'Bs') setAmountLocal(pendingDebtBs.toFixed(2));
     } else {
       if (currency === 'USD') setAmountLocal(pendingChangeUSD.toFixed(2));
       if (currency === 'COP') setAmountLocal(String(Math.round(changeInCOP)));
@@ -409,10 +434,6 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
         <div className="bg-stone-50 border-b border-gray-200 p-4 sm:p-6 shrink-0">
           {(() => {
             const scopeTotalBs = exchangeRates.Bs > 0 ? (scopeTotalCOP / exchangeRates.Bs) : 0;
-            const pendingDebtCOP = roundCOPPayment(pendingDebtUSD * exchangeRates.COP);
-            const pendingDebtBs = exchangeRates.Bs > 0 ? (pendingDebtUSD * exchangeRates.COP) / exchangeRates.Bs : 0;
-            const pendingChangeCOP = Math.max(0, totalTenderedCOP - scopeTotalCOP - totalChangeGivenCOP);
-            const pendingChangeBs = exchangeRates.Bs > 0 ? (pendingChangeCOP / exchangeRates.Bs) : 0;
 
             return (
               <>
@@ -480,9 +501,9 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
 
                 {/* Pending / Settled Status Alert */}
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  {pendingDebtUSD > 0.01 ? (
+                  {(pendingDebtUSD > 0.01 || pendingDebtCOP > 10) ? (
                     <span className="text-base sm:text-lg font-black text-red-700 bg-red-50 border-2 border-red-300 px-5 py-2.5 rounded-2xl shadow-xs">
-                      ⚠️ Pendiente por cobrar: {pendingDebtCOP.toLocaleString('es-CO')} COP (≈ ${pendingDebtUSD.toFixed(2)} USD / {pendingDebtBs.toFixed(2)} Bs)
+                      ⚠️ Pendiente por cobrar: {Math.round(pendingDebtCOP).toLocaleString('es-CO')} COP (≈ ${pendingDebtUSD.toFixed(2)} USD / {pendingDebtBs.toFixed(2)} Bs)
                     </span>
                   ) : pendingChangeUSD > 0.01 ? (
                     <span className="text-base sm:text-lg font-black text-amber-900 bg-amber-100 border-2 border-amber-300 px-5 py-2.5 rounded-2xl animate-pulse shadow-xs">

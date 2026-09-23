@@ -55,7 +55,7 @@ function killOldPosInstances() {
 
 function getConnectionInfo() {
   return new Promise((resolve, reject) => {
-    const request = http.get({ host: '127.0.0.1', port, path: '/api/connection-info', timeout: 1000 }, (response) => {
+    const request = http.get({ host: '127.0.0.1', port, path: '/api/connection-info', timeout: 2500 }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { body += chunk; });
@@ -66,7 +66,9 @@ function getConnectionInfo() {
         }
         try {
           const connectionInfo = JSON.parse(body);
-          if (!connectionInfo.backendUrl) throw new Error('No se detectó una IP LAN válida.');
+          if (!connectionInfo.backendUrl) {
+            connectionInfo.backendUrl = `http://localhost:${port}`;
+          }
           if (connectionInfo.app !== 'mugrosito' && connectionInfo.app !== 'crispy') throw new Error('El backend respondiendo no pertenece a Mugrosito.');
           resolve(connectionInfo);
         } catch (error) {
@@ -140,8 +142,9 @@ async function launch() {
   // 1. Si el backend ya está activo y respondiendo, abrir directamente el navegador
   try {
     const connectionInfo = await getConnectionInfo();
-    console.log('✅ Servidor POS ya activo en:', connectionInfo.backendUrl);
-    await openPos(connectionInfo.backendUrl);
+    const targetUrl = connectionInfo.backendUrl || `http://localhost:${port}`;
+    console.log('✅ Servidor POS ya activo en:', targetUrl);
+    await openPos(targetUrl);
     return;
   } catch (err) {
     console.log('El servidor POS no está activo aún. Iniciando...');
@@ -153,8 +156,9 @@ async function launch() {
 
   // 3. Esperar a que el backend esté listo
   const connectionInfo = await waitForBackend();
-  console.log('✅ Servidor POS iniciado en:', connectionInfo.backendUrl);
-  await openPos(connectionInfo.backendUrl);
+  const targetUrl = connectionInfo.backendUrl || `http://localhost:${port}`;
+  console.log('✅ Servidor POS iniciado en:', targetUrl);
+  await openPos(targetUrl);
 }
 
 launch().catch((error) => {

@@ -345,27 +345,13 @@ module.exports = function(io) {
         console.warn(`⚠️ Aviso: no se pudo imprimir ticket de cierre térmico:`, printErr.message);
       }
 
-      // 5. Archivado de turno: Archivar comandas pagadas y canceladas. Preservar cuentas a crédito activas (según GUIA.md)
-      const completedOrCancelledIds = shiftOrdersRows
-        .filter((o) => o.payment_status !== 'credito')
-        .map((o) => o.id);
+      // 5. Archivado de turno: Archivar todas las comandas del turno (pagadas, canceladas y créditos).
+      // La información de créditos queda 100% auditada y preservada en caja_chica_cierres y en la base de datos histórica.
+      const shiftOrderIds = shiftOrdersRows.map((o) => o.id);
 
-      if (completedOrCancelledIds.length > 0) {
-        await query('UPDATE orders SET archived_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]) AND archived_at IS NULL', [completedOrCancelledIds]);
-        console.log(`📦 [ARCHIVADO DE TURNO] Se archivaron ${completedOrCancelledIds.length} comandas pagadas/canceladas (data histórica 100% preservada en BD).`);
-      }
-
-      // 6. Preservación y Renumeración Consecutiva de Créditos Activos (#1, #2, ...)
-      const activeCredits = shiftOrdersRows
-        .filter((o) => o.payment_status === 'credito')
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-
-      for (let i = 0; i < activeCredits.length; i++) {
-        const newOrderNum = `#${i + 1}`;
-        await query('UPDATE orders SET order_number = $1 WHERE id = $2', [newOrderNum, activeCredits[i].id]);
-      }
-      if (activeCredits.length > 0) {
-        console.log(`📝 [PRESERVACIÓN DE CRÉDITOS] Se preservaron y renumeraron ${activeCredits.length} comandas a crédito activas.`);
+      if (shiftOrderIds.length > 0) {
+        await query('UPDATE orders SET archived_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]) AND archived_at IS NULL', [shiftOrderIds]);
+        console.log(`📦 [ARCHIVADO DE TURNO] Se archivaron ${shiftOrderIds.length} comandas del turno (pagadas, canceladas y créditos; data histórica 100% preservada en BD).`);
       }
 
       // 7. Marcar movimientos de caja chica con el cierreId (preservados en BD) y reiniciar apertura
@@ -398,9 +384,9 @@ module.exports = function(io) {
           actualCOP: normalizedActualCOP,
           differenceUSD: diffUSD,
           differenceCOP: diffCOP,
-          totalSalesUSD,
-          purgedOrdersCount: completedOrCancelledIds.length,
-          preservedCreditsCount: activeCredits.length,
+          purgedOrdersCount: shiftOrderIds.length,
+          archivedCreditsCount: parseInt(creditSummaryRows[0]?.count || 0, 10),
+          preservedCreditsCount: 0,
         },
       });
     } catch (err) {

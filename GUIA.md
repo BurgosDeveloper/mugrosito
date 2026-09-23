@@ -22,9 +22,10 @@ Reglas obligatorias:
    - Metodos validos: COP = Efectivo COP, Bancolombia, Nequi. USD = Efectivo USD, Binance, Zelle. Bs = Pago Movil, Punto de Venta / Tarjeta.
    - No se puede cerrar ni finalizar una comanda si existe deuda pendiente o vuelto pendiente de registrar.
 8. Cuentas a credito y cierre de turno:
-   - Al cerrar caja (`POST /api/caja/cierre`), archiva UNICAMENTE las comandas pagadas o canceladas (`payment_status != 'credito'`).
-   - Las comandas con `payment_status = 'credito'` se PRESERVAN activas (`archived_at = NULL`) y se renumeran consecutivamente a las primeras posiciones (`#1`, `#2`, etc.).
-   - Los nuevos pedidos creados en el ciclo posterior continuan correlativamente desde el ultimo credito preservado.
+   - Al cerrar caja (`POST /api/caja/cierre`), archiva TODAS las comandas del turno activo (`archived_at = CURRENT_TIMESTAMP`), incluyendo las cuentas a crédito (`payment_status = 'credito'`).
+   - El tablero activo de comandas queda 100% limpio y libre de pedidos pendientes.
+   - El correlativo del nuevo turno inicia siempre desde `#1`.
+   - La data de cuentas a crédito, clientes deudores y montos queda 100% preservada de forma auditable en el registro de cierre (`caja_chica_cierres`), en la tabla de órdenes (`archived_at IS NOT NULL`) y en el reporte contable del intervalo.
    - Las cuentas a credito NO generan registros en `caja_chica_transactions` ni suman dinero fisico en la gaveta.
 9. Reglas estrictas de cocina e impresion termica ESC/POS:
    - Comanda de cocina: Incluye hamburguesas, carnes, papas, jugos naturales y malteadas preparadas. Muestra proteinas cambiadas (`PROTEINAS: ...`), ingredientes retirados en mayusculas (`SIN: ...`), adicionales pagos (`ADD: ...`), corte (`🔪 PICADA`) y notas.
@@ -246,14 +247,14 @@ El sistema protege las operaciones críticas y administrativas permitiendo al ro
    - **🇻🇪 Bs**: Ámbar Dorado (`text-amber-300 / text-amber-800`).
    Todas las monedas se muestran con tipografía amplia y tarjetas con alto contraste para una percepción visual instantánea sin fatiga.
 
-## Arqueo, Cierre de Turno y Purga Automática con Preservación de Créditos
+## Arqueo, Cierre de Turno y Archivado de Comandas con Reseteo Correlativo
 
 1. **Seguridad en el Cierre**: El rol `caja` requiere autorización mediante PIN de 4 dígitos para realizar el arqueo y cierre del turno; el rol `admin` accede de forma directa.
 2. **Impresión Térmica Automática**: Al confirmar el arqueo de efectivo (contado físico USD y COP), el sistema emite de manera automática el ticket térmico de cierre detallando la apertura, los totales desglosados por método de pago, el resumen de créditos y el cuadre de caja chica (esperado vs contado vs diferencia).
-3. **Purga Automática Limpia**: Se eliminan de la base de datos las comandas finalizadas/cobradas al 100% (`payment_status = 'pagado'`), sus pagos e ítems, así como las transacciones y aperturas del turno cerrado, garantizando un inicio de ciclo limpio y sin necesidad de ejecutar scripts SQL manuales.
-4. **Preservación de Cuentas a Crédito**: Las comandas con deuda pendiente (`payment_status = 'credito'`) **NO** se borran del sistema; se conservan y se renumeran consecutivamente a las primeras posiciones (`#1`, `#2`, etc.) para mantener el histórico de cobro pendiente hasta que sean reactivadas y saldadas.
-5. **Continuidad Correlativa**: Los nuevos pedidos creados en el siguiente ciclo inician su numeración correlativa a continuación de los créditos preservados (o en `#1` si no existen créditos pendientes).
-6. **Integridad de Catálogos**: La purga del turno no altera bajo ninguna circunstancia los catálogos de menú (`products`), ingredientes (`ingredients`), mesas (`tables_config`), usuarios (`users`), tasas de cambio ni configuración del PIN.
+3. **Archivado Integral Limpio**: Se archivan de forma segura en PostgreSQL (`archived_at = CURRENT_TIMESTAMP`) todas las comandas del turno (pagadas, canceladas y créditos), dejando el tablero de comandas completamente despejado para el siguiente turno.
+4. **Preservación y Auditoría de Créditos**: La información de créditos y deudores queda 100% archivada y auditable en la base de datos histórica y reflejada en el ticket de cierre Z y reporte de intervalo.
+5. **Reinicio de Correlativo a #1**: Los nuevos pedidos creados en el siguiente turno inician su numeración correlativa limpiamente en `#1`.
+6. **Integridad de Catálogos**: El cierre de turno no altera bajo ninguna circunstancia los catálogos de menú (`products`), ingredientes (`ingredients`), mesas (`tables_config`), usuarios (`users`), tasas de cambio ni configuración del PIN.
 7. **Comprobación en Vivo del Arqueo**: En el modal de arqueo, al ingresar el conteo físico en USD y COP, el sistema valida en tiempo real si el efectivo cuadra exacto o si presenta sobrante/faltante con badges visuales de alto contraste antes de confirmar el cierre definitivo.
 
 ## Validación Obligatoria de Delivery y PickUp

@@ -215,17 +215,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const response = await fetch('/api/connection-info', { cache: 'no-store' });
         const connectionInfo = await response.json();
-        if (!response.ok || !connectionInfo.backendUrl) {
-          throw new Error('El servidor no tiene una IP LAN disponible.');
-        }
+        const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+        const targetBackendUrl = connectionInfo?.backendUrl || fallbackOrigin;
+
         if (isActive) {
-          setBackendUrlState(connectionInfo.backendUrl);
+          setBackendUrlState(targetBackendUrl);
           setSyncError(null);
         }
       } catch (error) {
         if (isActive) {
-          setIsConnected(false);
-          setSyncError('No se pudo detectar la IP LAN del servidor.');
+          const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+          setBackendUrlState(fallbackOrigin);
+          setSyncError(null);
         }
       }
     };

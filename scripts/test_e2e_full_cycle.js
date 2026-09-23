@@ -13,7 +13,8 @@
 const http = require('http');
 const { Pool } = require('pg');
 
-const LAN_IP = '192.168.1.6';
+const { getLanConnectionInfo } = require('../server/helpers/lan');
+const LAN_IP = getLanConnectionInfo().lanIp || '127.0.0.1';
 const PORT = 3001;
 
 const pool = new Pool({

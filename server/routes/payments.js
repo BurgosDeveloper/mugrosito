@@ -53,7 +53,7 @@ module.exports = function(io) {
       await client.query('BEGIN');
 
       const { rows: orderRows } = await client.query(
-        `SELECT id, order_number, type, total_usd, shift FROM orders WHERE id = $1 FOR UPDATE`,
+        `SELECT id, order_number, type, total_usd, total_cop, shift FROM orders WHERE id = $1 FOR UPDATE`,
         [id]
       );
       const order = orderRows[0];
@@ -136,8 +136,12 @@ module.exports = function(io) {
         // El monto imputado al pago (principal) es el mínimo entre lo entregado (amountUSD) y la deuda pendiente.
         // En COP, si el cliente paga el monto comercial redondeado, cubre la totalidad de la deuda.
         if (currency === 'COP') {
-          const requiredCOP = roundCOPPayment(scopePendingDebtUSD * copRate);
-          if (localAmount >= requiredCOP) {
+          const directTargetCOP = selectedTotalUSD > 0
+            ? (selectedTotalUSD * copRate)
+            : (Number(order.total_cop) > 0 ? Number(order.total_cop) : (orderTotal * copRate));
+          const roundedTargetCOP = roundCOPPayment(scopePendingDebtUSD * copRate);
+          const isFullCoverage = localAmount >= (directTargetCOP - 10) || localAmount >= roundedTargetCOP || (localAmount / copRate) >= (scopePendingDebtUSD - 0.01);
+          if (isFullCoverage) {
             amountPaidUSD = scopePendingDebtUSD;
           } else {
             amountPaidUSD = Math.min(scopePendingDebtUSD, localAmount / copRate);

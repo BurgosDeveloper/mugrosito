@@ -109,8 +109,7 @@ async function run() {
     });
 
     assert(cierreRes.status === 200, `Cierre de caja respondió 200 OK (got ${cierreRes.status})`);
-    const totalExpectedPreserved = existingCount + 2;
-    assert(cierreRes.data.summary?.preservedCreditsCount === totalExpectedPreserved, `Se preservaron exactamente ${totalExpectedPreserved} créditos activos`);
+    assert(cierreRes.data.summary?.purgedOrdersCount >= 4, `Se archivaron las comandas del turno (got ${cierreRes.data.summary?.purgedOrdersCount})`);
 
     // Verify DB states
     const chk1 = await client.query('SELECT archived_at FROM orders WHERE id = $1', [id1]);
@@ -119,19 +118,13 @@ async function run() {
     const chk2 = await client.query('SELECT archived_at FROM orders WHERE id = $1', [id2]);
     assert(chk2.rows[0].archived_at !== null, `Comanda cancelada fue archivada exitosamente`);
 
-    const expectedNum1 = `#${existingCount + 1}`;
-    const expectedNum2 = `#${existingCount + 2}`;
-    const expectedNext = `#${existingCount + 3}`;
-
     const chk3 = await client.query('SELECT archived_at, order_number FROM orders WHERE id = $1', [id3]);
-    assert(chk3.rows[0].archived_at === null, `Comanda a crédito 1 NO fue archivada (permanece activa)`);
-    assert(chk3.rows[0].order_number === expectedNum1, `Comanda a crédito 1 fue renumerada a ${expectedNum1} (got: ${chk3.rows[0].order_number})`);
+    assert(chk3.rows[0].archived_at !== null, `Comanda a crédito 1 fue archivada exitosamente`);
 
     const chk4 = await client.query('SELECT archived_at, order_number FROM orders WHERE id = $1', [id4]);
-    assert(chk4.rows[0].archived_at === null, `Comanda a crédito 2 NO fue archivada (permanece activa)`);
-    assert(chk4.rows[0].order_number === expectedNum2, `Comanda a crédito 2 fue renumerada a ${expectedNum2} (got: ${chk4.rows[0].order_number})`);
+    assert(chk4.rows[0].archived_at !== null, `Comanda a crédito 2 fue archivada exitosamente`);
 
-    // 5. Create new order after cierre and check correlative
+    // 5. Create new order after cierre and check correlative resets to #1
     const newOrdRes = await request('POST', '/api/orders', {
       type: 'delivery',
       customerName: 'Cliente Post Cierre',
@@ -146,7 +139,7 @@ async function run() {
     if (newOrdId) testOrderIds.push(newOrdId);
 
     const chk5 = await client.query('SELECT order_number FROM orders WHERE id = $1', [newOrdId]);
-    assert(chk5.rows[0].order_number === expectedNext, `Nueva comanda tras cierre continúa el correlativo en ${expectedNext} (después de los créditos! Got: ${chk5.rows[0].order_number})`);
+    assert(chk5.rows[0].order_number === '#1', `Nueva comanda tras cierre reinicia el correlativo en #1 (Got: ${chk5.rows[0].order_number})`);
 
   } finally {
     if (testOrderIds.length > 0) {

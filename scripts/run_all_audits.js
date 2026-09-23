@@ -10,15 +10,16 @@ const suites = [
   { file: 'test_mugrosito_cop_primary_accounting.js', name: 'Contabilidad Base COP y Conversiones' },
   { file: 'test_reports_and_items_audit.js', name: 'Auditoría de Ítems, Proteínas y Reportes' },
   { file: 'test_complete_accounting.js', name: 'Caja Chica, Gaveta y Redondeo Comercial' },
+  { file: 'test_task2_ledger_consistency.js', name: 'Consistencia Exacta de Montos y Cobro en COP' },
   { file: 'test_merge_and_transfer.js', name: 'Fusión de Órdenes y Transferencia de Servicios' },
   { file: 'test_e2e_full_cycle.js', name: 'Ciclo E2E Completo en Red LAN' },
-  { file: 'test_cierre_and_credits.js', name: 'Cierre de Turno y Preservación de Créditos' },
+  { file: 'test_cierre_and_credits.js', name: 'Cierre de Turno y Archivado de Créditos' },
   { file: 'test_guia_md_scenarios.js', name: 'Escenarios Operativos Obligatorios de GUIA.md' },
   { file: 'test_thermal_printing_simulation.js', name: 'Impresión Térmica ESC/POS y Conectividad LAN' }
 ];
 
 console.log('======================================================================');
-console.log('   🚀 EJECUTANDO AUDITORÍA GLOBAL DE PUNTA A PUNTA (8 SUITES)');
+console.log('   🚀 EJECUTANDO AUDITORÍA GLOBAL DE PUNTA A PUNTA (9 SUITES)');
 console.log('======================================================================\n');
 
 let totalSuitesPassed = 0;
