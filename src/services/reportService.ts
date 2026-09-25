@@ -289,9 +289,11 @@ export class ReportService {
   // 1. Reporte de Hot Dogs e Ítems Vendidos
   generateProductsSoldReport(orders: Order[], rates: ExchangeRates) {
     const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
-    const tally: Record<string, { qty: number; revenueUSD: number; category: string }> = {};
+    const tally: Record<string, { qty: number; revenueUSD: number; revenueCOP: number; category: string }> = {};
 
     paidOrders.forEach((o) => {
+      const itCopRate = Number(o.copRateAtPayment) || rates.COP || 3100;
+
       // 1. Productos y Adicionales
       o.items.forEach((it) => {
         const catLower = (it.category || '').toLowerCase();
@@ -311,60 +313,82 @@ export class ReportService {
           } catch (e) {}
         }
 
-        let paidExtrasUnitCost = 0;
+        let paidExtrasUnitCostUSD = 0;
+        let paidExtrasUnitCostCOP = 0;
         extrasList.forEach((extra) => {
-          const price = Number(extra.price) || 0;
+          const rawPrice = Number(extra.price) || 0;
           const exQty = Number(extra.quantity) || 1;
           const rawName = (extra.name || 'Adicional').trim();
           const cleanBaseName = rawName.replace(/^\d+x\s*/i, '').trim();
-          if (price > 0) {
-            paidExtrasUnitCost += price;
+          if (rawPrice > 0) {
+            const isCOP = rawPrice >= 100;
+            const exCOP = isCOP ? rawPrice : Math.round(rawPrice * itCopRate);
+            const exUSD = isCOP ? (itCopRate > 0 ? rawPrice / itCopRate : 0) : rawPrice;
+            paidExtrasUnitCostUSD += exUSD;
+            paidExtrasUnitCostCOP += exCOP;
             const extraDisplayName = `ADD ${cleanBaseName}`;
             if (!tally[extraDisplayName]) {
               tally[extraDisplayName] = {
                 qty: 0,
                 revenueUSD: 0,
+                revenueCOP: 0,
                 category: 'Adicionales',
               };
             }
             tally[extraDisplayName].qty += itQty * exQty;
-            tally[extraDisplayName].revenueUSD += price * itQty;
+            tally[extraDisplayName].revenueUSD += exUSD * itQty;
+            tally[extraDisplayName].revenueCOP += exCOP * itQty;
           }
         });
 
         // Producto a precio base
         const rawPrice = Number(it.price) || 0;
-        const baseUnitPrice = Math.max(0, rawPrice - paidExtrasUnitCost);
+        const isCOP = rawPrice >= 100;
+        const itemPriceCOP = isCOP ? rawPrice : Math.round(rawPrice * itCopRate);
+        const itemPriceUSD = isCOP ? (itCopRate > 0 ? rawPrice / itCopRate : 0) : rawPrice;
+
+        const baseUnitPriceUSD = Math.max(0, itemPriceUSD - paidExtrasUnitCostUSD);
+        const baseUnitPriceCOP = Math.max(0, itemPriceCOP - paidExtrasUnitCostCOP);
         if (!tally[displayName]) {
           tally[displayName] = {
             qty: 0,
             revenueUSD: 0,
-            category: isComida ? 'Hot Dogs' : (it.category || 'Bebidas/Otros'),
+            revenueCOP: 0,
+            category: isComida ? 'Hamburguesas y Comidas' : (it.category || 'Bebidas/Otros'),
           };
         }
         tally[displayName].qty += itQty;
-        tally[displayName].revenueUSD += baseUnitPrice * itQty;
+        tally[displayName].revenueUSD += baseUnitPriceUSD * itQty;
+        tally[displayName].revenueCOP += baseUnitPriceCOP * itQty;
       });
 
       // 2. Servicios de Delivery Facturados (tanto pedidos Delivery como mesas con delivery)
-      const deliveryFee = Number(o.deliveryFeeUSD) || 0;
-      if (deliveryFee > 0 || o.type === 'delivery') {
-        const dName = deliveryFee > 0 ? `Servicio Delivery ($${deliveryFee.toFixed(2)})` : 'Servicio Delivery';
+      let deliveryFeeUSD = Number(o.deliveryFeeUSD) || 0;
+      let deliveryFeeCOP = Number(o.deliveryFeeCOP) || 0;
+      if (deliveryFeeCOP === 0 && deliveryFeeUSD > 0) deliveryFeeCOP = deliveryFeeUSD >= 100 ? deliveryFeeUSD : Math.round(deliveryFeeUSD * itCopRate);
+      if (deliveryFeeUSD === 0 && deliveryFeeCOP > 0) deliveryFeeUSD = itCopRate > 0 ? deliveryFeeCOP / itCopRate : 0;
+      if (deliveryFeeUSD >= 100 && deliveryFeeCOP > 0) deliveryFeeUSD = itCopRate > 0 ? deliveryFeeCOP / itCopRate : 0;
+
+      if (deliveryFeeUSD > 0 || deliveryFeeCOP > 0 || o.type === 'delivery') {
+        const dName = deliveryFeeCOP > 0 ? `Servicio Delivery (${Math.round(deliveryFeeCOP).toLocaleString('es-CO')} COP)` : 'Servicio Delivery';
         if (!tally[dName]) {
           tally[dName] = {
             qty: 0,
             revenueUSD: 0,
+            revenueCOP: 0,
             category: 'Delivery',
           };
         }
         tally[dName].qty += 1;
-        tally[dName].revenueUSD += deliveryFee;
+        tally[dName].revenueUSD += deliveryFeeUSD;
+        tally[dName].revenueCOP += deliveryFeeCOP;
       }
     });
 
     const entries = Object.entries(tally).sort((a, b) => b[1].qty - a[1].qty);
     const totalItems = entries.reduce((sum, e) => sum + e[1].qty, 0);
     const totalRevenueUSD = entries.reduce((sum, e) => sum + e[1].revenueUSD, 0);
+    const totalRevenueCOP = entries.reduce((sum, e) => sum + e[1].revenueCOP, 0);
 
     const rows = entries
       .map(
@@ -374,14 +398,19 @@ export class ReportService {
         <td><strong>${name}</strong></td>
         <td><span style="background:#f3f4f6; padding:2px 8px; border-radius:6px; font-weight:700;">${data.category}</span></td>
         <td style="text-align:center;"><strong>${data.qty}</strong> u.</td>
-        <td style="text-align:right; font-weight:700;">$${data.revenueUSD.toFixed(2)}</td>
+        <td style="text-align:right; font-weight:700;">
+          ${Math.round(data.revenueCOP).toLocaleString('es-CO')} COP
+          <span style="font-size:9.5px; font-weight:normal; color:#4b5563; display:block;">
+            (≈ $${data.revenueUSD.toFixed(2)} USD)
+          </span>
+        </td>
       </tr>
     `
       )
       .join('');
 
     const content = `
-      <div class="section-title">DESGLOSE DE HOT DOGS Y COMIDAS VENDIDAS</div>
+      <div class="section-title">DESGLOSE DE ÍTEMS Y COMIDAS VENDIDAS</div>
       <table>
         <thead>
           <tr>
@@ -389,7 +418,7 @@ export class ReportService {
             <th>Producto / Especialidad</th>
             <th>Categoría</th>
             <th style="text-align:center;">Unidades</th>
-            <th style="text-align:right;">Subtotal USD</th>
+            <th style="text-align:right;">Subtotal COP</th>
           </tr>
         </thead>
         <tbody>
@@ -403,13 +432,14 @@ export class ReportService {
           <div style="font-size: 14px; font-weight: 800;">${totalItems} Unidades</div>
         </div>
         <div style="text-align:right; margin-top:5px;">
-          <div class="total-label">RECAUDACIÓN TOTAL PRODUCTOS:</div>
-          <div class="total-val">$${totalRevenueUSD.toFixed(2)} USD</div>
+          <div class="total-label">RECAUDACIÓN TOTAL PRODUCTOS (PESOS):</div>
+          <div class="total-val">${Math.round(totalRevenueCOP).toLocaleString('es-CO')} COP</div>
+          <div style="font-size:10px; font-weight:700; color:#065f46; margin-top:2px;">(≈ $${totalRevenueUSD.toFixed(2)} USD)</div>
         </div>
       </div>
     `;
 
-    this.openPrintWindow('Reporte_Ventas_HotDogs', content);
+    this.openPrintWindow('Reporte_Ventas_Productos', content);
   }
 
   // Alias para compatibilidad
@@ -532,6 +562,11 @@ export class ReportService {
       })
       .join('');
 
+    const copRateGlobal = Number(rates.COP) || 3100;
+    const bsRateGlobal = Number(rates.Bs) || 3.2;
+    const totalRecaudadoCOP = byCurrency.COP + (byCurrency.USD * copRateGlobal) + (bsRateGlobal > 0 ? (byCurrency.Bs * bsRateGlobal) : 0);
+    const totalRecaudadoUSD = copRateGlobal > 0 ? (totalRecaudadoCOP / copRateGlobal) : totalUSD;
+
     const content = `
       <div class="section-title">TOTALES POR MONEDA</div>
       <table>
@@ -543,12 +578,12 @@ export class ReportService {
         </thead>
         <tbody>
           <tr>
-            <td>💵 Dólares (USD)</td>
-            <td style="text-align:right; font-weight:900; color:#047857;">$${byCurrency.USD.toFixed(2)}</td>
+            <td>🇨🇴 Pesos Colombianos (COP)</td>
+            <td style="text-align:right; font-weight:900; color:#047857;">$${Math.round(byCurrency.COP).toLocaleString('es-CO')} COP</td>
           </tr>
           <tr>
-            <td>🇨🇴 Pesos Colombianos (COP)</td>
-            <td style="text-align:right; font-weight:700;">$${Math.round(byCurrency.COP).toLocaleString()} COP</td>
+            <td>💵 Dólares (USD)</td>
+            <td style="text-align:right; font-weight:700;">$${byCurrency.USD.toFixed(2)} USD</td>
           </tr>
           <tr>
             <td>🇻🇪 Bolívares (Bs)</td>
@@ -581,19 +616,23 @@ export class ReportService {
             <tr>
               <th>Comanda</th>
               <th>Cliente / Deudor</th>
-              <th style="text-align:right;">Monto Deuda USD</th>
+              <th style="text-align:right;">Monto Deuda COP</th>
             </tr>
           </thead>
           <tbody>
-            ${creditOrders.map((o) => `<tr><td><strong>#${o.orderNumber}</strong></td><td>${this.escapeHtml(o.customerName || 'Deudor')}</td><td style="text-align:right; font-weight:900; color:#b45309;">$${o.totalUSD.toFixed(2)}</td></tr>`).join('')}
+            ${creditOrders.map((o) => {
+              const oCop = (o as any).totalCOP || Math.round((o.totalUSD || 0) * (o.copRateAtPayment || copRateGlobal));
+              return `<tr><td><strong>#${o.orderNumber}</strong></td><td>${this.escapeHtml(o.customerName || 'Deudor')}</td><td style="text-align:right; font-weight:900; color:#b45309;">${Math.round(oCop).toLocaleString('es-CO')} COP <div style="font-size:9.5px; font-weight:normal; color:#78350f;">(≈ $${o.totalUSD.toFixed(2)} USD)</div></td></tr>`;
+            }).join('')}
           </tbody>
         </table>
       ` : ''}
 
       <div class="total-box">
-        <div class="total-label">TOTAL BRUTO RECAUDADO (CONTADO):</div>
-        <div class="total-val">$${totalUSD.toFixed(2)} USD</div>
-        ${totalCreditUSD > 0 ? `<div style="font-size:11px; font-weight:800; color:#b45309; margin-top:4px;">Total cuentas a crédito: $${totalCreditUSD.toFixed(2)} USD</div>` : ''}
+        <div class="total-label">TOTAL BRUTO RECAUDADO EN PESOS:</div>
+        <div class="total-val">${Math.round(totalRecaudadoCOP).toLocaleString('es-CO')} COP</div>
+        <div style="font-size:11px; font-weight:800; color:#047857; margin-top:2px;">(≈ $${totalRecaudadoUSD.toFixed(2)} USD)</div>
+        ${totalCreditUSD > 0 ? `<div style="font-size:11px; font-weight:800; color:#b45309; margin-top:4px;">Total cuentas a crédito: ${Math.round(totalCreditUSD * copRateGlobal).toLocaleString('es-CO')} COP (≈ $${totalCreditUSD.toFixed(2)} USD)</div>` : ''}
       </div>
     `;
 
@@ -604,6 +643,12 @@ export class ReportService {
   generateExpensesReport(transactions: CajaChicaTransaction[]) {
     const egresos = transactions.filter((t) => t.type === 'egreso');
     const totalEgresosUSD = egresos.reduce((sum, t) => sum + t.amountUSD, 0);
+    const totalEgresosCOP = egresos.reduce((sum, t) => {
+      if (t.amountCOP > 0) return sum + t.amountCOP;
+      if (t.amountUSD > 0) return sum + (t.amountUSD * 3100);
+      if (t.amountBs > 0) return sum + (t.amountBs * 3.2);
+      return sum;
+    }, 0);
 
     const rows = egresos
       .map((t) => {
@@ -639,8 +684,9 @@ export class ReportService {
       </table>
 
       <div class="total-box" style="background:#fef2f2; border-color:#fecaca;">
-        <div class="total-label" style="color:#991b1b;">TOTAL EGRESOS / VUELTOS:</div>
-        <div class="total-val" style="color:#dc2626;">-$${totalEgresosUSD.toFixed(2)} USD</div>
+        <div class="total-label" style="color:#991b1b;">TOTAL EGRESOS / VUELTOS (PESOS):</div>
+        <div class="total-val" style="color:#dc2626;">-${Math.round(totalEgresosCOP).toLocaleString('es-CO')} COP</div>
+        <div style="font-size:11px; font-weight:800; color:#dc2626; margin-top:2px;">(≈ -$${totalEgresosUSD.toFixed(2)} USD)</div>
       </div>
     `;
 
@@ -873,9 +919,9 @@ export class ReportService {
           <td><strong>${this.escapeHtml(item.name)}</strong></td>
           <td style="text-align:center; width:60px;">${item.quantity}</td>
           <td style="text-align:right; width:150px; font-weight:700;">
-            $${item.subtotalUSD.toFixed(2)} USD
-            <span style="font-size:10px; font-weight:normal; color:#4b5563; display:block;">
-              ${Math.round(item.subtotalCOP).toLocaleString('es-CO')} COP
+            ${Math.round(item.subtotalCOP).toLocaleString('es-CO')} COP
+            <span style="font-size:9.5px; font-weight:normal; color:#4b5563; display:block;">
+              (≈ $${item.subtotalUSD.toFixed(2)} USD)
             </span>
           </td>
         </tr>
@@ -891,7 +937,7 @@ export class ReportService {
         1. COMIDAS (Hamburguesas, Hot Dogs y Platos)
       </div>
       <table>
-        <thead><tr><th>Producto</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <thead><tr><th>Producto</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total COP</th></tr></thead>
         <tbody>${renderRows(cat.comidasItems, 'Sin comidas facturadas en el intervalo.')}</tbody>
       </table>
 
@@ -900,7 +946,7 @@ export class ReportService {
         2. BEBIDAS (Refrescos, Jugos, Cervezas, Aguas)
       </div>
       <table>
-        <thead><tr><th>Bebida (Unificada)</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <thead><tr><th>Bebida (Unificada)</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total COP</th></tr></thead>
         <tbody>${renderRows(cat.bebidasItems, 'Sin bebidas facturadas en el intervalo.')}</tbody>
       </table>
 
@@ -909,7 +955,7 @@ export class ReportService {
         3. ADICIONALES (Pagos y Toppings Gratis)
       </div>
       <table>
-        <thead><tr><th>Adicional / Topping</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <thead><tr><th>Adicional / Topping</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total COP</th></tr></thead>
         <tbody>${renderRows(cat.adicionalesItems, 'Sin adicionales facturados en el intervalo.')}</tbody>
       </table>
 
@@ -918,7 +964,7 @@ export class ReportService {
         4. SERVICIOS Y DELIVERY
       </div>
       <table>
-        <thead><tr><th>Concepto</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total</th></tr></thead>
+        <thead><tr><th>Concepto</th><th style="text-align:center; width:60px;">Cant.</th><th style="text-align:right; width:150px;">Total COP</th></tr></thead>
         <tbody>${renderRows(cat.otrosItems, 'Sin servicios de delivery facturados.')}</tbody>
       </table>
 
@@ -929,10 +975,10 @@ export class ReportService {
             <div style="font-size:14px; font-weight:900; color:#111827;">${cat.totalUnits} unidades</div>
           </div>
           <div style="text-align:right;">
-            <div class="total-label" style="color:#065f46; font-size:10px;">TOTAL FACTURADO EN ÍTEMS:</div>
-            <div class="total-val" style="color:#047857; font-size:16px;">$${cat.totalRevenueUSD.toFixed(2)} USD</div>
-            <div style="font-size:9px; font-weight:800; color:#065f46; margin-top:2px;">
-              (${Math.round(cat.totalRevenueCOP).toLocaleString('es-CO')} COP / ${cat.totalRevenueBs.toFixed(2)} Bs)
+            <div class="total-label" style="color:#065f46; font-size:10px;">TOTAL FACTURADO EN ÍTEMS (PESOS):</div>
+            <div class="total-val" style="color:#047857; font-size:16px;">${Math.round(cat.totalRevenueCOP).toLocaleString('es-CO')} COP</div>
+            <div style="font-size:10px; font-weight:800; color:#065f46; margin-top:2px;">
+              (≈ $${cat.totalRevenueUSD.toFixed(2)} USD / ${cat.totalRevenueBs.toFixed(2)} Bs)
             </div>
           </div>
         </div>
@@ -961,7 +1007,7 @@ export class ReportService {
       totals.usd += amounts.usd;
       totals.cop += amounts.cop;
       totals.bs += amounts.bs;
-      const formattedAmount = amounts.currency === 'USD' ? `$${amounts.usd.toFixed(2)}` : amounts.currency === 'COP' ? `$${Math.round(amounts.cop).toLocaleString()}` : `Bs ${amounts.bs.toFixed(2)}`;
+      const formattedAmount = amounts.currency === 'USD' ? `$${amounts.usd.toFixed(2)}` : amounts.currency === 'COP' ? `$${Math.round(amounts.cop).toLocaleString()} COP` : `Bs ${amounts.bs.toFixed(2)}`;
       return `<tr><td>${this.reportDate(payment.createdAt)}</td><td>#${this.escapeHtml(payment.orderNumber)}</td><td>${this.escapeHtml(this.paymentMethodLabel(payment.paymentMethod))}</td><td>${this.escapeHtml(payment.payerName)}</td><td>${amounts.currency}</td><td style="text-align:right; font-weight:700; color:#047857;">+${formattedAmount}</td></tr>`;
     });
 
@@ -970,23 +1016,32 @@ export class ReportService {
       if (curr === 'USD') totals.usd += t.amountUSD;
       if (curr === 'COP') totals.cop += t.amountCOP;
       if (curr === 'Bs') totals.bs += t.amountBs;
-      const formattedAmount = curr === 'USD' ? `$${t.amountUSD.toFixed(2)}` : curr === 'COP' ? `$${Math.round(t.amountCOP).toLocaleString()}` : `Bs ${t.amountBs.toFixed(2)}`;
+      const formattedAmount = curr === 'USD' ? `$${t.amountUSD.toFixed(2)}` : curr === 'COP' ? `$${Math.round(t.amountCOP).toLocaleString()} COP` : `Bs ${t.amountBs.toFixed(2)}`;
       return `<tr><td>${this.reportDate(t.timestamp)}</td><td>Ingreso Manual</td><td>${this.escapeHtml(t.paymentMethod || 'Efectivo')}</td><td>${this.escapeHtml(t.description || 'Caja Chica')}</td><td>${curr}</td><td style="text-align:right; font-weight:700; color:#047857;">+${formattedAmount}</td></tr>`;
     });
 
     const allRows = [...orderRows, ...manualRows].join('');
+
+    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const totalRecaudadoCOP = totals.cop + (totals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (totals.bs * bsRateGlobal) : 0);
+    const totalRecaudadoUSD = copRateGlobal > 0 ? (totalRecaudadoCOP / copRateGlobal) : totals.usd;
 
     this.openPrintWindow('Ingresos_y_Cobros_Intervalo', `
       <div class="section-title">INGRESOS Y COBROS POR MÉTODO DE PAGO</div>
       <p style="font-size:12px; color:#4b5563;">${this.intervalTitle(data)}</p>
       <table><thead><tr><th>Fecha / Hora</th><th>Comanda / Origen</th><th>Método</th><th>Pagador / Concepto</th><th>Moneda</th><th style="text-align:right;">Monto</th></tr></thead><tbody>${allRows || '<tr><td colspan="6" style="text-align:center;">Sin cobros ni ingresos en el intervalo.</td></tr>'}</tbody></table>
       <div class="total-box" style="background:#ecfdf5; border-color:#a7f3d0; margin-top:16px;">
-        <div style="font-size:11px; font-weight:900; color:#065f46; margin-bottom:6px;">TOTAL INGRESOS RECIBIDOS:</div>
-        <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:13px; font-weight:900; color:#047857;">
+        <div style="font-size:11px; font-weight:900; color:#065f46; margin-bottom:4px;">TOTAL INGRESOS RECIBIDOS (PESOS):</div>
+        <div style="font-size:18px; font-weight:900; color:#047857; margin-bottom:6px;">
+          ${Math.round(totalRecaudadoCOP).toLocaleString('es-CO')} COP <span style="font-size:11px; font-weight:700; color:#065f46;">(≈ $${totalRecaudadoUSD.toFixed(2)} USD)</span>
+        </div>
+        <div style="font-size:10px; font-weight:800; color:#065f46; margin-bottom:4px;">DESGLOSE POR MONEDA:</div>
+        <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:12px; font-weight:900; color:#047857;">
+          ${totals.cop > 0 ? `<span>🇨🇴 $${Math.round(totals.cop).toLocaleString('es-CO')} COP</span>` : ''}
           ${totals.usd > 0 ? `<span>💵 $${totals.usd.toFixed(2)} USD</span>` : ''}
-          ${totals.cop > 0 ? `<span>🇨🇴 $${Math.round(totals.cop).toLocaleString()} COP</span>` : ''}
           ${totals.bs > 0 ? `<span>🇻🇪 Bs ${totals.bs.toFixed(2)}</span>` : ''}
-          ${totals.usd === 0 && totals.cop === 0 && totals.bs === 0 ? '<span>$0.00</span>' : ''}
+          ${totals.usd === 0 && totals.cop === 0 && totals.bs === 0 ? '<span>$0 COP</span>' : ''}
         </div>
       </div>
     `);
@@ -1001,21 +1056,30 @@ export class ReportService {
       if (curr === 'USD') totals.usd += transaction.amountUSD;
       if (curr === 'COP') totals.cop += transaction.amountCOP;
       if (curr === 'Bs') totals.bs += transaction.amountBs;
-      const amount = curr === 'USD' ? `$${transaction.amountUSD.toFixed(2)}` : curr === 'COP' ? `$${Math.round(transaction.amountCOP).toLocaleString()}` : `Bs ${transaction.amountBs.toFixed(2)}`;
+      const amount = curr === 'USD' ? `$${transaction.amountUSD.toFixed(2)}` : curr === 'COP' ? `$${Math.round(transaction.amountCOP).toLocaleString()} COP` : `Bs ${transaction.amountBs.toFixed(2)}`;
       return `<tr><td>${this.reportDate(transaction.timestamp)}</td><td>${this.escapeHtml(transaction.description)}</td><td>${this.escapeHtml(this.paymentMethodLabel(transaction.paymentMethod))}</td><td>${curr}</td><td style="text-align:right; color:#dc2626; font-weight:700;">-${amount}</td></tr>`;
     }).join('');
+
+    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const totalEgresosCOP = totals.cop + (totals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (totals.bs * bsRateGlobal) : 0);
+    const totalEgresosUSD = copRateGlobal > 0 ? (totalEgresosCOP / copRateGlobal) : totals.usd;
 
     this.openPrintWindow('Vueltos_y_Egresos_Intervalo', `
       <div class="section-title">VUELTOS Y EGRESOS DE CAJA CHICA</div>
       <p style="font-size:12px; color:#4b5563;">${this.intervalTitle(data)}</p>
       <table><thead><tr><th>Fecha / Hora</th><th>Descripción</th><th>Método</th><th>Moneda</th><th style="text-align:right;">Monto</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center;">Sin egresos en el intervalo.</td></tr>'}</tbody></table>
       <div class="total-box" style="background:#fef2f2; border-color:#fecaca; margin-top:16px;">
-        <div style="font-size:11px; font-weight:900; color:#991b1b; margin-bottom:6px;">TOTAL VUELTOS Y EGRESOS ENTREGADOS:</div>
-        <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:13px; font-weight:900; color:#dc2626;">
-          ${totals.usd > 0 ? `<span>💵 $${totals.usd.toFixed(2)} USD</span>` : ''}
-          ${totals.cop > 0 ? `<span>🇨🇴 $${Math.round(totals.cop).toLocaleString()} COP</span>` : ''}
-          ${totals.bs > 0 ? `<span>🇻🇪 Bs ${totals.bs.toFixed(2)}</span>` : ''}
-          ${totals.usd === 0 && totals.cop === 0 && totals.bs === 0 ? '<span>$0.00</span>' : ''}
+        <div style="font-size:11px; font-weight:900; color:#991b1b; margin-bottom:4px;">TOTAL VUELTOS Y EGRESOS ENTREGADOS (PESOS):</div>
+        <div style="font-size:18px; font-weight:900; color:#dc2626; margin-bottom:6px;">
+          -${Math.round(totalEgresosCOP).toLocaleString('es-CO')} COP <span style="font-size:11px; font-weight:700; color:#991b1b;">(≈ -$${totalEgresosUSD.toFixed(2)} USD)</span>
+        </div>
+        <div style="font-size:10px; font-weight:800; color:#991b1b; margin-bottom:4px;">DESGLOSE POR MONEDA:</div>
+        <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:12px; font-weight:900; color:#dc2626;">
+          ${totals.cop > 0 ? `<span>🇨🇴 -$${Math.round(totals.cop).toLocaleString('es-CO')} COP</span>` : ''}
+          ${totals.usd > 0 ? `<span>💵 -$${totals.usd.toFixed(2)} USD</span>` : ''}
+          ${totals.bs > 0 ? `<span>🇻🇪 -Bs ${totals.bs.toFixed(2)}</span>` : ''}
+          ${totals.usd === 0 && totals.cop === 0 && totals.bs === 0 ? '<span>$0 COP</span>' : ''}
         </div>
       </div>
     `);
@@ -1169,9 +1233,9 @@ export class ReportService {
           <td><strong>${this.escapeHtml(item.name)}</strong></td>
           <td style="text-align:center;">${item.quantity}</td>
           <td style="text-align:right; font-weight:700;">
-            $${item.subtotalUSD.toFixed(2)} USD
+            ${Math.round(item.subtotalCOP).toLocaleString('es-CO')} COP
             <span style="font-size:9.5px; font-weight:normal; color:#4b5563; display:block;">
-              ${Math.round(item.subtotalCOP).toLocaleString('es-CO')} COP
+              (≈ $${item.subtotalUSD.toFixed(2)} USD)
             </span>
           </td>
         </tr>
@@ -1185,7 +1249,8 @@ export class ReportService {
     const totalItemsUSD = cat.totalRevenueUSD;
     const totalItemsCOP = cat.totalRevenueCOP;
     const totalItemsBs = cat.totalRevenueBs;
-    const totalVentaFacturadaUSD = billedTotals.usd + (billedTotals.cop / copRateGlobal) + ((billedTotals.bs * bsRateGlobal) / copRateGlobal);
+    const totalVentaFacturadaCOP = billedTotals.cop + (billedTotals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (billedTotals.bs * bsRateGlobal) : 0);
+    const totalVentaFacturadaUSD = copRateGlobal > 0 ? (totalVentaFacturadaCOP / copRateGlobal) : billedTotals.usd;
 
     const firstOrder = data.orders[0]?.orderNumber || 'N/A';
     const lastOrder = data.orders[data.orders.length - 1]?.orderNumber || 'N/A';
@@ -1227,8 +1292,8 @@ export class ReportService {
           <td><strong>${this.escapeHtml(ord.customerName || 'Cliente Deudor')}</strong></td>
           <td style="font-size:7.5px;">${orderItems || 'Consumo general'}</td>
           <td style="text-align:right; font-weight:900; color:#b45309;">
-            $${ord.totalUSD.toFixed(2)} USD
-            <div style="font-size:7px; color:#78350f; font-weight:normal;">(${copEquiv} COP / ${bsEquiv} Bs)</div>
+            ${copEquiv} COP
+            <div style="font-size:7px; color:#78350f; font-weight:normal;">(≈ $${ord.totalUSD.toFixed(2)} USD / ${bsEquiv} Bs)</div>
           </td>
         </tr>
       `;
@@ -1307,20 +1372,23 @@ export class ReportService {
         </thead>
         <tbody>
           <tr>
-            <td>Dólares (USD)</td>
-            <td style="text-align:right; font-weight:900; color:#047857;">$${billedTotals.usd.toFixed(2)}</td>
+            <td>🇨🇴 Pesos Colombianos (COP)</td>
+            <td style="text-align:right; font-weight:900; color:#047857;">$${Math.round(billedTotals.cop).toLocaleString('es-CO')} COP</td>
           </tr>
           <tr>
-            <td>Pesos Colombianos (COP)</td>
-            <td style="text-align:right; font-weight:700;">$${Math.round(billedTotals.cop).toLocaleString()} COP</td>
+            <td>💵 Dólares (USD)</td>
+            <td style="text-align:right; font-weight:700;">$${billedTotals.usd.toFixed(2)} USD</td>
           </tr>
           <tr>
-            <td>Bolívares (Bs)</td>
+            <td>🇻🇪 Bolívares (Bs)</td>
             <td style="text-align:right; font-weight:700;">Bs ${billedTotals.bs.toFixed(2)}</td>
           </tr>
           <tr style="background:#ecfdf5; border-top:2px solid #059669;">
-            <td><strong style="color:#065f46; font-size:11.5px;">TOTAL FACTURADO (VENDIDO):</strong></td>
-            <td style="text-align:right; font-weight:900; color:#047857; font-size:13px;">$${totalVentaFacturadaUSD.toFixed(2)} USD</td>
+            <td><strong style="color:#065f46; font-size:11.5px;">VENTA TOTAL EN PESOS (FACTURADO):</strong></td>
+            <td style="text-align:right; font-weight:900; color:#047857; font-size:14px;">
+              ${Math.round(totalVentaFacturadaCOP).toLocaleString('es-CO')} COP
+              <div style="font-size:10px; font-weight:700; color:#065f46;">(≈ $${totalVentaFacturadaUSD.toFixed(2)} USD)</div>
+            </td>
           </tr>
           <tr style="background:#f9fafb;">
             <td><strong>Total Comandas Atendidas:</strong></td>
@@ -1369,8 +1437,9 @@ export class ReportService {
           </tbody>
         </table>
         <div class="total-box" style="background:#fffbeb; border-color:#fde68a;">
-          <div class="total-label" style="color:#92400e;">TOTAL CUENTAS A CRÉDITO POR COBRAR:</div>
-          <div class="total-val" style="color:#b45309;">$${totalCreditUSD.toFixed(2)} USD</div>
+          <div class="total-label" style="color:#92400e;">TOTAL CUENTAS A CRÉDITO POR COBRAR (PESOS):</div>
+          <div class="total-val" style="color:#b45309;">${Math.round(totalCreditUSD * copRateGlobal).toLocaleString('es-CO')} COP</div>
+          <div style="font-size:10px; font-weight:700; color:#92400e;">(≈ $${totalCreditUSD.toFixed(2)} USD)</div>
         </div>
       ` : `
         <div class="section-title">SECCIÓN 4 — DESGLOSE DE CRÉDITOS Y CUENTAS POR COBRAR</div>
@@ -1395,7 +1464,7 @@ export class ReportService {
           <tr>
             <th>Producto</th>
             <th style="text-align:center; width:60px;">Cant.</th>
-            <th style="text-align:right; width:110px;">Total USD</th>
+            <th style="text-align:right; width:130px;">Total COP</th>
           </tr>
         </thead>
         <tbody>
@@ -1412,7 +1481,7 @@ export class ReportService {
           <tr>
             <th>Producto (Unificado)</th>
             <th style="text-align:center; width:60px;">Cant.</th>
-            <th style="text-align:right; width:110px;">Total USD</th>
+            <th style="text-align:right; width:130px;">Total COP</th>
           </tr>
         </thead>
         <tbody>
@@ -1429,7 +1498,7 @@ export class ReportService {
           <tr>
             <th>Concepto</th>
             <th style="text-align:center; width:60px;">Cant.</th>
-            <th style="text-align:right; width:110px;">Total USD</th>
+            <th style="text-align:right; width:130px;">Total COP</th>
           </tr>
         </thead>
         <tbody>
@@ -1446,7 +1515,7 @@ export class ReportService {
           <tr>
             <th>Concepto</th>
             <th style="text-align:center; width:60px;">Cant.</th>
-            <th style="text-align:right; width:110px;">Total USD</th>
+            <th style="text-align:right; width:130px;">Total COP</th>
           </tr>
         </thead>
         <tbody>
@@ -1455,10 +1524,10 @@ export class ReportService {
       </table>
 
       <div class="total-box" style="margin-top:14px; background:#ecfdf5; border-color:#059669;">
-        <div class="total-label" style="color:#065f46; font-size:11px;">TOTAL GENERAL FACTURADO EN ÍTEMS:</div>
-        <div class="total-val" style="color:#047857; font-size:14px;">$${totalItemsUSD.toFixed(2)} USD</div>
-        <div style="font-size:9.5px; font-weight:800; color:#065f46; margin-top:2px;">
-          (${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP / ${totalItemsBs.toFixed(2)} Bs)
+        <div class="total-label" style="color:#065f46; font-size:11px;">TOTAL GENERAL FACTURADO EN ÍTEMS (PESOS):</div>
+        <div class="total-val" style="color:#047857; font-size:15px;">${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP</div>
+        <div style="font-size:10px; font-weight:800; color:#065f46; margin-top:2px;">
+          (≈ $${totalItemsUSD.toFixed(2)} USD / ${totalItemsBs.toFixed(2)} Bs)
         </div>
       </div>
     `;

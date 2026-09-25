@@ -765,7 +765,7 @@ function buildReportTicket(reportType, data) {
           lines.push('', ...wrapText(`CATEGORIA: ${category}`));
         }
         lines.push(...wrapText(`${item.quantity}x ${item.name}`, LINE_WIDTH, '  '));
-        lines.push(`  SUBTOTAL: $${item.totalUSD.toFixed(2)} USD / ${Math.round(item.totalCOP || 0).toLocaleString('es-CO')} COP`);
+        lines.push(`  SUBTOTAL: ${Math.round(item.totalCOP || 0).toLocaleString('es-CO')} COP (≈ $${item.totalUSD.toFixed(2)} USD)`);
       }
     }
     addSection(lines, 'RESUMEN DE VENTAS');
@@ -995,16 +995,18 @@ function buildReportTicket(reportType, data) {
       }
     }
 
-    const totalFacturadoUSD = billedTotals.usd + (billedTotals.cop / copRateGlobal) + (billedTotals.bs / bsRateGlobal);
+    const totalFacturadoCOP = billedTotals.cop + (billedTotals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (billedTotals.bs * bsRateGlobal) : 0);
+    const totalFacturadoUSD = copRateGlobal > 0 ? (totalFacturadoCOP / copRateGlobal) : billedTotals.usd;
 
     // SECCIÓN 2 — TOTAL FACTURADO POR MONEDA
     addSection(lines, 'SECCION 2: FACTURADO', reportWidth);
-    lines.push(...wrapText(`USD: $${billedTotals.usd.toFixed(2)}`, reportWidth));
     lines.push(...wrapText(`COP: $${Math.round(billedTotals.cop).toLocaleString('en-US')} COP`, reportWidth));
+    lines.push(...wrapText(`USD: $${billedTotals.usd.toFixed(2)}`, reportWidth));
     lines.push(...wrapText(`Bs:  Bs ${billedTotals.bs.toFixed(2)}`, reportWidth));
     lines.push(divider('-', reportWidth));
     lines.push('\x1BE\x01');
-    lines.push(...wrapText(`TOTAL: $${totalFacturadoUSD.toFixed(2)} USD`, reportWidth));
+    lines.push(...wrapText(`VENTA TOTAL: ${Math.round(totalFacturadoCOP).toLocaleString('en-US')} COP`, reportWidth));
+    lines.push(...wrapText(`  (≈ $${totalFacturadoUSD.toFixed(2)} USD)`, reportWidth));
     lines.push('\x1BE\x00');
     lines.push(divider('-', reportWidth));
     lines.push(...wrapText(`TOTAL COMANDAS: ${(data.orders || []).length}`, reportWidth));
@@ -1031,13 +1033,15 @@ function buildReportTicket(reportType, data) {
     // SECCIÓN 4 — DESGLOSE DE CRÉDITOS Y CUENTAS POR COBRAR (SI APLICA)
     if (creditOrders.length > 0) {
       const totalCreditUSD = creditOrders.reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0);
+      const totalCreditCOP = Math.round(totalCreditUSD * copRateGlobal);
       addSection(lines, 'SECCION 4: CUENTAS POR COBRAR', reportWidth);
       for (const ord of creditOrders) {
+        const ordCOP = Math.round((Number(ord.totalUSD) || 0) * (Number(ord.copRateAtPayment) || copRateGlobal));
         lines.push('', ...wrapText(`#${ord.orderNumber} | ${ord.customerName || 'Cliente'}`, reportWidth));
-        lines.push(...wrapText(`  DEUDA: $${(Number(ord.totalUSD) || 0).toFixed(2)} USD`, reportWidth));
+        lines.push(...wrapText(`  DEUDA: ${ordCOP.toLocaleString('en-US')} COP (≈ $${(Number(ord.totalUSD) || 0).toFixed(2)})`, reportWidth));
       }
       lines.push(divider('-', reportWidth));
-      lines.push(...wrapText(`TOTAL A CREDITO: $${totalCreditUSD.toFixed(2)} USD`, reportWidth));
+      lines.push(...wrapText(`TOTAL A CREDITO: ${totalCreditCOP.toLocaleString('en-US')} COP`, reportWidth));
     }
 
     // SECCIÓN 6 — ÍTEMS FACTURADOS (Estructurado en 4 Secciones)
@@ -1063,18 +1067,23 @@ function buildReportTicket(reportType, data) {
 
       const itCopRate = Number(it.copRate) || copRateGlobal;
       let paidExtrasUnitCostUSD = 0;
+      let paidExtrasUnitCostCOP = 0;
       for (const extra of extrasList) {
         const rawExtraPrice = Number(extra.price) || 0;
         const extraName = (extra.name || 'Adicional').trim();
         if (rawExtraPrice > 0) {
+          const exIsCOP = rawExtraPrice >= 100;
+          const exCOP = exIsCOP ? rawExtraPrice : Math.round(rawExtraPrice * itCopRate);
           let extraUSD = Number(extra.priceUSD);
           if (isNaN(extraUSD) || extraUSD === 0) {
-            extraUSD = rawExtraPrice >= 100 ? (itCopRate > 0 ? rawExtraPrice / itCopRate : 0) : rawExtraPrice;
+            extraUSD = exIsCOP ? (itCopRate > 0 ? rawExtraPrice / itCopRate : 0) : rawExtraPrice;
           }
           paidExtrasUnitCostUSD += extraUSD;
-          const current = paidExtrasMap.get(extraName) || { name: `ADD ${extraName}`, quantity: 0, subtotalUSD: 0 };
+          paidExtrasUnitCostCOP += exCOP;
+          const current = paidExtrasMap.get(extraName) || { name: `ADD ${extraName}`, quantity: 0, subtotalUSD: 0, subtotalCOP: 0 };
           current.quantity += itQty;
           current.subtotalUSD += extraUSD * itQty;
+          current.subtotalCOP += exCOP * itQty;
           paidExtrasMap.set(extraName, current);
         } else {
           freeToppingsCount += itQty;
@@ -1082,12 +1091,16 @@ function buildReportTicket(reportType, data) {
       }
 
       const rawPrice = Number(it.price) || 0;
+      const isCOP = rawPrice >= 100;
+      const itPriceCOP = isCOP ? rawPrice : Math.round(rawPrice * itCopRate);
       let itPriceUSD = Number(it.priceUSD);
       if (isNaN(itPriceUSD) || itPriceUSD === 0) {
-        itPriceUSD = rawPrice >= 100 ? (itCopRate > 0 ? rawPrice / itCopRate : 0) : rawPrice;
+        itPriceUSD = isCOP ? (itCopRate > 0 ? rawPrice / itCopRate : 0) : rawPrice;
       }
       const baseUnitPrice = Math.max(0, itPriceUSD - paidExtrasUnitCostUSD);
+      const baseUnitPriceCOP = Math.max(0, itPriceCOP - paidExtrasUnitCostCOP);
       const baseSubtotal = baseUnitPrice * itQty;
+      const baseSubtotalCOP = baseUnitPriceCOP * itQty;
 
       const catLower = (it.category || '').toLowerCase().trim();
       const rawLower = (it.productName || it.name || '').toLowerCase().trim();
@@ -1133,9 +1146,10 @@ function buildReportTicket(reportType, data) {
         rawLower.includes('servicio');
 
       const targetMap = isDrink ? drinkMap : isOther ? otherProductsMap : foodMap;
-      const prevProd = targetMap.get(cleanName) || { name: cleanName, quantity: 0, subtotalUSD: 0 };
+      const prevProd = targetMap.get(cleanName) || { name: cleanName, quantity: 0, subtotalUSD: 0, subtotalCOP: 0 };
       prevProd.quantity += itQty;
       prevProd.subtotalUSD += baseSubtotal;
+      prevProd.subtotalCOP += baseSubtotalCOP;
       targetMap.set(cleanName, prevProd);
     }
 
@@ -1144,7 +1158,7 @@ function buildReportTicket(reportType, data) {
 
     const adicionalesList = Array.from(paidExtrasMap.values()).filter((e) => e.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
     if (freeToppingsCount > 0) {
-      adicionalesList.push({ name: 'Toppings Gratis', quantity: freeToppingsCount, subtotalUSD: 0 });
+      adicionalesList.push({ name: 'Toppings Gratis', quantity: freeToppingsCount, subtotalUSD: 0, subtotalCOP: 0 });
     }
 
     const otrosList = [];
@@ -1152,7 +1166,8 @@ function buildReportTicket(reportType, data) {
     for (const fee of sortedFees) {
       const count = deliveryMap.get(fee) || 0;
       if (fee > 0 && count > 0) {
-        otrosList.push({ name: `Delivery ($${fee.toFixed(2)})`, quantity: count, subtotalUSD: fee * count });
+        const feeCOP = Math.round(fee * copRateGlobal);
+        otrosList.push({ name: `Delivery ($${fee.toFixed(2)})`, quantity: count, subtotalUSD: fee * count, subtotalCOP: feeCOP * count });
       }
     }
     for (const prod of otherProductsMap.values()) {
@@ -1161,15 +1176,20 @@ function buildReportTicket(reportType, data) {
 
     const totalComidasUnits = comidasList.reduce((s, it) => s + it.quantity, 0);
     const totalComidasUSD = comidasList.reduce((s, it) => s + it.subtotalUSD, 0);
+    const totalComidasCOP = comidasList.reduce((s, it) => s + (it.subtotalCOP || 0), 0);
     const totalBebidasUnits = bebidasList.reduce((s, it) => s + it.quantity, 0);
     const totalBebidasUSD = bebidasList.reduce((s, it) => s + it.subtotalUSD, 0);
+    const totalBebidasCOP = bebidasList.reduce((s, it) => s + (it.subtotalCOP || 0), 0);
     const totalAdicionalesUnits = adicionalesList.reduce((s, it) => s + it.quantity, 0);
     const totalAdicionalesUSD = adicionalesList.reduce((s, it) => s + it.subtotalUSD, 0);
+    const totalAdicionalesCOP = adicionalesList.reduce((s, it) => s + (it.subtotalCOP || 0), 0);
     const totalOtrosUnits = otrosList.reduce((s, it) => s + it.quantity, 0);
     const totalOtrosUSD = otrosList.reduce((s, it) => s + it.subtotalUSD, 0);
+    const totalOtrosCOP = otrosList.reduce((s, it) => s + (it.subtotalCOP || 0), 0);
 
     const grandUnits = totalComidasUnits + totalBebidasUnits + totalAdicionalesUnits + totalOtrosUnits;
     const grandUSD = totalComidasUSD + totalBebidasUSD + totalAdicionalesUSD + totalOtrosUSD;
+    const grandCOP = totalComidasCOP + totalBebidasCOP + totalAdicionalesCOP + totalOtrosCOP;
 
     addSection(lines, creditOrders.length > 0 ? 'SECCION 5: ITEMS FACTURADOS' : 'SECCION 4: ITEMS FACTURADOS', reportWidth);
 
@@ -1179,7 +1199,7 @@ function buildReportTicket(reportType, data) {
       lines.push('  SIN COMIDAS');
     } else {
       for (const it of comidasList) {
-        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | $${it.subtotalUSD.toFixed(2)}`, reportWidth));
+        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | ${Math.round(it.subtotalCOP || 0).toLocaleString('en-US')} COP`, reportWidth));
       }
     }
 
@@ -1189,7 +1209,7 @@ function buildReportTicket(reportType, data) {
       lines.push('  SIN BEBIDAS');
     } else {
       for (const it of bebidasList) {
-        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | $${it.subtotalUSD.toFixed(2)}`, reportWidth));
+        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | ${Math.round(it.subtotalCOP || 0).toLocaleString('en-US')} COP`, reportWidth));
       }
     }
 
@@ -1199,7 +1219,7 @@ function buildReportTicket(reportType, data) {
       lines.push('  SIN ADICIONALES');
     } else {
       for (const it of adicionalesList) {
-        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | $${it.subtotalUSD.toFixed(2)}`, reportWidth));
+        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | ${Math.round(it.subtotalCOP || 0).toLocaleString('en-US')} COP`, reportWidth));
       }
     }
 
@@ -1209,14 +1229,14 @@ function buildReportTicket(reportType, data) {
       lines.push('  SIN OTROS CONCEPTOS');
     } else {
       for (const it of otrosList) {
-        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | $${it.subtotalUSD.toFixed(2)}`, reportWidth));
+        lines.push(...wrapText(`  ${it.quantity}x ${it.name} | ${Math.round(it.subtotalCOP || 0).toLocaleString('en-US')} COP`, reportWidth));
       }
     }
 
     lines.push(divider('-', reportWidth));
     lines.push('\x1BE\x01');
     lines.push(...wrapText(`TOTAL GENERAL FACTURADO EN ITEMS:`, reportWidth));
-    lines.push(...wrapText(`$${grandUSD.toFixed(2)} USD`, reportWidth));
+    lines.push(...wrapText(`${Math.round(grandCOP).toLocaleString('en-US')} COP (≈ $${grandUSD.toFixed(2)} USD)`, reportWidth));
     lines.push('\x1BE\x00');
   }
 
@@ -2210,15 +2230,17 @@ function buildCrispysCierreTicket(data) {
     : (data.orders || []).filter((o) => o.paymentStatus === 'credito');
   if (creditOrders.length === 0) {
     if (Number(data.creditsUSD) > 0) {
-      lines.push(formatTwoColumns('CREDITOS TURNO', `${Number(data.creditsUSD).toFixed(2)}$`));
+      const crCOP = Math.round(Number(data.creditsUSD) * copRateGlobal);
+      lines.push(formatTwoColumns('CREDITOS TURNO', `${crCOP.toLocaleString('en-US')}COP`));
     } else {
-      lines.push(formatTwoColumns('SIN CREDITOS', '0.00$'));
+      lines.push(formatTwoColumns('SIN CREDITOS', '0 COP'));
     }
   } else {
     for (const ord of creditOrders) {
       const deudor = printableText(ord.customerName || `Comanda #${ord.orderNumber}`).toUpperCase().substring(0, 16);
-      const monto = Number(ord.totalUSD || 0);
-      lines.push(formatTwoColumns(deudor, `${monto.toFixed(2)}$`));
+      const montoUSD = Number(ord.totalUSD || 0);
+      const montoCOP = Number(ord.totalCOP) || Math.round(montoUSD * (Number(ord.copRateAtPayment) || copRateGlobal));
+      lines.push(formatTwoColumns(deudor, `${Math.round(montoCOP).toLocaleString('en-US')}COP`));
     }
   }
   lines.push(divider('-'));
@@ -2231,6 +2253,7 @@ function buildCrispysCierreTicket(data) {
   const otroGroup = new Map();
 
   let totalItemsUSD = 0;
+  let totalItemsCOP = 0;
 
   for (const item of (data.items || [])) {
     const ordCopRate = Number(item.copRate) || Number(data.exchangeRates?.COP) || copRateGlobal;
@@ -2251,34 +2274,45 @@ function buildCrispysCierreTicket(data) {
     }
 
     let paidExtrasCostUSD = 0;
+    let paidExtrasCostCOP = 0;
     for (const ex of extrasList) {
       const rawExPrice = Number(ex.price) || 0;
       const exQty = Number(ex.quantity) || 1;
       const rawName = (ex.name || 'Adicional').trim();
       const cleanBaseName = rawName.replace(/^\d+x\s*/i, '').trim().toUpperCase();
       if (rawExPrice > 0) {
+        const exIsCOP = rawExPrice >= 100;
+        const exCOP = exIsCOP ? rawExPrice : Math.round(rawExPrice * ordCopRate);
         let exUSD = Number(ex.priceUSD);
         if (isNaN(exUSD) || exUSD === 0) {
-          exUSD = rawExPrice >= 100 ? (ordCopRate > 0 ? rawExPrice / ordCopRate : 0) : rawExPrice;
+          exUSD = exIsCOP ? (ordCopRate > 0 ? rawExPrice / ordCopRate : 0) : rawExPrice;
         }
         paidExtrasCostUSD += exUSD;
+        paidExtrasCostCOP += exCOP;
         const extraKey = `ADD ${cleanBaseName}`;
-        const currExtra = otroGroup.get(extraKey) || { name: extraKey, quantity: 0, totalUSD: 0 };
+        const currExtra = otroGroup.get(extraKey) || { name: extraKey, quantity: 0, totalUSD: 0, totalCOP: 0 };
         currExtra.quantity += itQty * exQty;
         currExtra.totalUSD += exUSD * itQty;
+        currExtra.totalCOP += exCOP * itQty;
         otroGroup.set(extraKey, currExtra);
         totalItemsUSD += exUSD * itQty;
+        totalItemsCOP += exCOP * itQty;
       }
     }
 
+    const isCOP = rawPrice >= 100;
+    const itemPriceCOP = isCOP ? rawPrice : Math.round(rawPrice * ordCopRate);
     let itPriceUSD = Number(item.priceUSD);
     if (isNaN(itPriceUSD) || itPriceUSD === 0) {
-      itPriceUSD = rawPrice >= 100 ? (ordCopRate > 0 ? rawPrice / ordCopRate : 0) : rawPrice;
+      itPriceUSD = isCOP ? (ordCopRate > 0 ? rawPrice / ordCopRate : 0) : rawPrice;
     }
 
     const baseUnitPrice = Math.max(0, itPriceUSD - paidExtrasCostUSD);
+    const baseUnitPriceCOP = Math.max(0, itemPriceCOP - paidExtrasCostCOP);
     const itemTotalUSD = baseUnitPrice * itQty;
+    const itemTotalCOP = baseUnitPriceCOP * itQty;
     totalItemsUSD += itemTotalUSD;
+    totalItemsCOP += itemTotalCOP;
 
     const baseName = getReportBaseProductName(item).toUpperCase();
     const nameLower = rawName.toLowerCase();
@@ -2290,24 +2324,28 @@ function buildCrispysCierreTicket(data) {
     const isComida = rawCat.includes('hot dog') || rawCat.includes('perro') || rawCat.includes('mugrosito') || rawCat.includes('burger') || rawCat.includes('hamburguesa') || rawCat.includes('comida') || rawCat.includes('plato') || rawCat.includes('entrada') || rawCat.includes('acompañante') || rawCat.includes('combo') || (!isDrink && !isDelivery && !rawCat.includes('adicional') && !rawCat.includes('extra') && !rawCat.includes('topping'));
 
     if (isDelivery) {
-      const curr = deliverysGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0 };
+      const curr = deliverysGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0, totalCOP: 0 };
       curr.quantity += itQty;
       curr.totalUSD += itemTotalUSD;
+      curr.totalCOP += itemTotalCOP;
       deliverysGroup.set(baseName, curr);
     } else if (isDrink) {
-      const curr = bebidasGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0 };
+      const curr = bebidasGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0, totalCOP: 0 };
       curr.quantity += itQty;
       curr.totalUSD += itemTotalUSD;
+      curr.totalCOP += itemTotalCOP;
       bebidasGroup.set(baseName, curr);
     } else if (isComida) {
-      const curr = comidasGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0 };
+      const curr = comidasGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0, totalCOP: 0 };
       curr.quantity += itQty;
       curr.totalUSD += itemTotalUSD;
+      curr.totalCOP += itemTotalCOP;
       comidasGroup.set(baseName, curr);
     } else {
-      const curr = otroGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0 };
+      const curr = otroGroup.get(baseName) || { name: baseName, quantity: 0, totalUSD: 0, totalCOP: 0 };
       curr.quantity += itQty;
       curr.totalUSD += itemTotalUSD;
+      curr.totalCOP += itemTotalCOP;
       otroGroup.set(baseName, curr);
     }
   }
@@ -2315,20 +2353,25 @@ function buildCrispysCierreTicket(data) {
   for (const ord of (data.orders || [])) {
     const ordCopRate = Number(ord.copRateAtPayment) || Number(data.exchangeRates?.COP) || copRateGlobal;
     let feeUSD = Number(ord.deliveryFeeUSD || ord.delivery_fee_usd || 0);
-    const feeCOP = Number(ord.deliveryFeeCOP || ord.delivery_fee_cop || 0);
+    let feeCOP = Number(ord.deliveryFeeCOP || ord.delivery_fee_cop || 0);
     if (feeCOP > 0 && (feeUSD === 0 || feeUSD >= 100)) {
       feeUSD = ordCopRate > 0 ? feeCOP / ordCopRate : 0;
     } else if (feeUSD >= 100) {
+      feeCOP = feeUSD;
       feeUSD = ordCopRate > 0 ? feeUSD / ordCopRate : 0;
+    } else if (feeCOP === 0 && feeUSD > 0) {
+      feeCOP = Math.round(feeUSD * ordCopRate);
     }
 
     if (feeUSD > 0 || feeCOP > 0 || ord.type === 'delivery') {
       const delName = 'DELIVERY';
-      const curr = deliverysGroup.get(delName) || { name: delName, quantity: 0, totalUSD: 0 };
+      const curr = deliverysGroup.get(delName) || { name: delName, quantity: 0, totalUSD: 0, totalCOP: 0 };
       curr.quantity += 1;
       curr.totalUSD += feeUSD;
+      curr.totalCOP += feeCOP;
       deliverysGroup.set(delName, curr);
       totalItemsUSD += feeUSD;
+      totalItemsCOP += feeCOP;
     }
   }
 
@@ -2336,10 +2379,10 @@ function buildCrispysCierreTicket(data) {
   lines.push('\x1Ba\x01', '\x1BE\x01', 'COMIDAS', '\x1BE\x00', '\x1Ba\x00');
   lines.push(formatThreeColumns('ITEM', 'CANT', 'MONTO'));
   if (comidasGroup.size === 0) {
-    lines.push(formatThreeColumns('SIN COMIDAS', '0', '$0.00'));
+    lines.push(formatThreeColumns('SIN COMIDAS', '0', '0 COP'));
   } else {
     for (const it of comidasGroup.values()) {
-      lines.push(formatThreeColumns(it.name, String(it.quantity), `$${it.totalUSD.toFixed(2)}`));
+      lines.push(formatThreeColumns(it.name, String(it.quantity), `${Math.round(it.totalCOP).toLocaleString('en-US')}COP`));
     }
   }
   lines.push(divider('-'));
@@ -2348,10 +2391,10 @@ function buildCrispysCierreTicket(data) {
   lines.push('\x1Ba\x01', '\x1BE\x01', 'BEBIDAS', '\x1BE\x00', '\x1Ba\x00');
   lines.push(formatThreeColumns('ITEM', 'CANT', 'MONTO'));
   if (bebidasGroup.size === 0) {
-    lines.push(formatThreeColumns('SIN BEBIDAS', '0', '$0.00'));
+    lines.push(formatThreeColumns('SIN BEBIDAS', '0', '0 COP'));
   } else {
     for (const it of bebidasGroup.values()) {
-      lines.push(formatThreeColumns(it.name, String(it.quantity), `$${it.totalUSD.toFixed(2)}`));
+      lines.push(formatThreeColumns(it.name, String(it.quantity), `${Math.round(it.totalCOP).toLocaleString('en-US')}COP`));
     }
   }
   lines.push(divider('-'));
@@ -2360,10 +2403,10 @@ function buildCrispysCierreTicket(data) {
   lines.push('\x1Ba\x01', '\x1BE\x01', 'DELIVERYS', '\x1BE\x00', '\x1Ba\x00');
   lines.push(formatThreeColumns('ITEM', 'CANT', 'MONTO'));
   if (deliverysGroup.size === 0) {
-    lines.push(formatThreeColumns('SIN DELIVERYS', '0', '$0.00'));
+    lines.push(formatThreeColumns('SIN DELIVERYS', '0', '0 COP'));
   } else {
     for (const it of deliverysGroup.values()) {
-      lines.push(formatThreeColumns(it.name, String(it.quantity), `$${it.totalUSD.toFixed(2)}`));
+      lines.push(formatThreeColumns(it.name, String(it.quantity), `${Math.round(it.totalCOP).toLocaleString('en-US')}COP`));
     }
   }
   lines.push(divider('-'));
@@ -2372,17 +2415,18 @@ function buildCrispysCierreTicket(data) {
   lines.push('\x1Ba\x01', '\x1BE\x01', 'OTRO', '\x1BE\x00', '\x1Ba\x00');
   lines.push(formatThreeColumns('ITEM', 'CANT', 'MONTO'));
   if (otroGroup.size === 0) {
-    lines.push(formatThreeColumns('SIN OTROS', '0', '$0.00'));
+    lines.push(formatThreeColumns('SIN OTROS', '0', '0 COP'));
   } else {
     for (const it of otroGroup.values()) {
-      lines.push(formatThreeColumns(it.name, String(it.quantity), `$${it.totalUSD.toFixed(2)}`));
+      lines.push(formatThreeColumns(it.name, String(it.quantity), `${Math.round(it.totalCOP).toLocaleString('en-US')}COP`));
     }
   }
   lines.push(divider('='));
 
   // TOTAL GENERAL ITEMS
   lines.push('\x1BE\x01');
-  lines.push(formatTwoColumns('TOTAL GENERAL:', `$${totalItemsUSD.toFixed(2)} USD`));
+  lines.push(formatTwoColumns('TOTAL GENERAL:', `${Math.round(totalItemsCOP).toLocaleString('en-US')} COP`));
+  lines.push(formatTwoColumns('EQUIV USD:', `$${totalItemsUSD.toFixed(2)} USD`));
   lines.push('\x1BE\x00');
   lines.push(divider('='));
 

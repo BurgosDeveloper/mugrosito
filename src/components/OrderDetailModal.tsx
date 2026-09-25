@@ -133,7 +133,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   // Calculate sum of currently selected items if in selectable mode
   const selectedTotalCOP = order.items
     .filter((it) => selectedItemIds.includes(it.id))
-    .reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+    .reduce((sum, it) => {
+      const priceCOP = (Number(it.price) || 0) >= 100 ? (Number(it.price) || 0) : ((Number(it.price) || 0) * copRate);
+      return sum + priceCOP * (Number(it.quantity) || 1);
+    }, 0);
   const selectedTotalUSD = copRate > 0 ? selectedTotalCOP / copRate : 0;
 
   const cleanOrderNumber = order.orderNumber.toString().replace(/^#+/, '');
@@ -218,7 +221,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               PRODUCTOS DEL PEDIDO ({order.items.length})
             </h4>
             {order.items.map((item, index) => {
-              const itemTotal = (item.price || 0) * (item.quantity || 1);
+              const itemUnitPriceCOP = (item.price || 0) >= 100 ? (item.price || 0) : ((item.price || 0) * copRate);
+              const itemTotal = itemUnitPriceCOP * (item.quantity || 1);
               const isSelected = selectedItemIds.includes(item.id);
               const isPaidIndividually = item.isPaidIndividually;
 
@@ -336,7 +340,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       )}
                       {item.extras && item.extras.length > 0 && (
                         <div className="text-xs sm:text-sm font-bold pl-2 mt-1 text-emerald-700">
-                          {item.category && item.category !== 'Pizzas' && item.category !== 'Hamburguesas' && item.category !== 'Hot Dogs' ? '🥗 Contorno(s):' : '➕ ADD:'} {item.extras.map(e => `${(e.quantity && e.quantity > 1) ? `${e.quantity}x ` : ''}${e.name}${e.price > 0 ? ` (+$${e.price.toFixed(2)})` : ''}`).join(', ')}
+                          {item.category && item.category !== 'Pizzas' && item.category !== 'Hamburguesas' && item.category !== 'Hot Dogs' ? '🥗 Contorno(s):' : '➕ ADD:'}{' '}
+                          {item.extras.map((e) => {
+                            const extraCOP = (e.price || 0) >= 100 ? (e.price || 0) : ((e.price || 0) * copRate);
+                            return `${(e.quantity && e.quantity > 1) ? `${e.quantity}x ` : ''}${e.name}${e.price > 0 ? ` (+${Math.round(extraCOP).toLocaleString('es-CO')} COP)` : ''}`;
+                          }).join(', ')}
                         </div>
                       )}
                     </>

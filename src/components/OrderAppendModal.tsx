@@ -461,11 +461,15 @@ export const OrderAppendModal: React.FC<OrderAppendModalProps> = ({
   // Cálculos de montos en COP nativo
   const currentSubtotalCOP = (order.items || []).reduce((sum, item) => {
     if (removedItemIds.includes(item.id)) return sum;
-    return sum + (item.price || 0) * (item.quantity || 1);
+    const priceCOP = (item.price || 0) >= 100 ? (item.price || 0) : ((item.price || 0) * copRate);
+    return sum + priceCOP * (item.quantity || 1);
   }, 0);
 
   const addedSubtotalCOP = itemsToAdd.reduce(
-    (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+    (sum, item) => {
+      const priceCOP = (item.price || 0) >= 100 ? (item.price || 0) : ((item.price || 0) * copRate);
+      return sum + priceCOP * (item.quantity || 1);
+    },
     0
   );
 

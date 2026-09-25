@@ -219,15 +219,16 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     });
   });
 
-  const totalFacturadoUSD = billedTotals.usd + (copRateGlobal > 0 ? billedTotals.cop / copRateGlobal : 0) + (bsRateGlobal > 0 && copRateGlobal > 0 ? (billedTotals.bs * bsRateGlobal) / copRateGlobal : 0);
+  const totalFacturadoCOP = billedTotals.cop + (billedTotals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (billedTotals.bs * bsRateGlobal) : 0);
+  const totalFacturadoUSD = copRateGlobal > 0 ? (totalFacturadoCOP / copRateGlobal) : billedTotals.usd;
 
   const totalesData = [
     ['MUGROSITO - CIERRE DE CAJA EN EL INTERVALO CONSOLIDADO'],
     ['Desde:', formatDate(data.dateRange.from), 'Hasta:', formatDate(data.dateRange.to)],
     [],
-    ['Concepto', 'USD', 'COP', 'Bs'],
-    ['Total Facturado (Vendido)', billedTotals.usd.toFixed(2), Math.round(billedTotals.cop).toLocaleString(), billedTotals.bs.toFixed(2)],
-    ['Total Venta Facturada (Equiv. USD)', `$${totalFacturadoUSD.toFixed(2)} USD`, '', ''],
+    ['Concepto', 'COP', 'USD', 'Bs'],
+    ['Total Facturado (Vendido)', `${Math.round(billedTotals.cop).toLocaleString('es-CO')} COP`, `$${billedTotals.usd.toFixed(2)} USD`, `Bs ${billedTotals.bs.toFixed(2)}`],
+    ['Total Venta Facturada (Pesos COP)', `${Math.round(totalFacturadoCOP).toLocaleString('es-CO')} COP`, `(≈ $${totalFacturadoUSD.toFixed(2)} USD)`, ''],
     [],
     ['Total Comandas', data.orders.length.toString()],
     ['Comandas de Contado', cashOrders.length.toString()],
@@ -441,47 +442,47 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   const totalItemsUSD = comidasUSD + bebidasUSD + adicionalesUSD + otrosUSD;
   const totalItemsCOP = [...comidasItems, ...bebidasItems, ...adicionalesItems, ...otrosItems].reduce((s, it) => s + (it.subtotalCOP || 0), 0);
 
-  const itemsHeader = ['Ítem / Concepto', 'Cantidad', 'Total USD', 'Total COP'];
+  const itemsHeader = ['Ítem / Concepto', 'Cantidad', 'Total COP', 'Total USD'];
   const itemsRows: string[][] = [];
 
   // 1. COMIDAS
   itemsRows.push(['--- 1. COMIDAS (Hot Dogs, Raciones) ---', '', '', '']);
   if (comidasItems.length === 0) {
-    itemsRows.push(['Sin comidas facturadas', '0', '0.00', '0']);
+    itemsRows.push(['Sin comidas facturadas', '0', '0 COP', '0.00 USD']);
   } else {
-    comidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
+    comidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), `${Math.round(it.subtotalCOP).toLocaleString('es-CO')} COP`, `$${it.subtotalUSD.toFixed(2)} USD`]));
   }
   itemsRows.push([]);
 
   // 2. BEBIDAS
   itemsRows.push(['--- 2. BEBIDAS (Refrescos, Jugos, Aguas) ---', '', '', '']);
   if (bebidasItems.length === 0) {
-    itemsRows.push(['Sin bebidas facturadas', '0', '0.00', '0']);
+    itemsRows.push(['Sin bebidas facturadas', '0', '0 COP', '0.00 USD']);
   } else {
-    bebidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
+    bebidasItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), `${Math.round(it.subtotalCOP).toLocaleString('es-CO')} COP`, `$${it.subtotalUSD.toFixed(2)} USD`]));
   }
   itemsRows.push([]);
 
   // 3. ADICIONALES
   itemsRows.push(['--- 3. ADICIONALES (Pagos y Toppings Gratis) ---', '', '', '']);
   if (adicionalesItems.length === 0) {
-    itemsRows.push(['Sin adicionales facturados', '0', '0.00', '0']);
+    itemsRows.push(['Sin adicionales facturados', '0', '0 COP', '0.00 USD']);
   } else {
-    adicionalesItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
+    adicionalesItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), `${Math.round(it.subtotalCOP).toLocaleString('es-CO')} COP`, `$${it.subtotalUSD.toFixed(2)} USD`]));
   }
   itemsRows.push([]);
 
   // 4. OTROS
   itemsRows.push(['--- 4. OTROS (Servicios de Delivery y Otros) ---', '', '', '']);
   if (otrosItems.length === 0) {
-    itemsRows.push(['Sin otros conceptos', '0', '0.00', '0']);
+    itemsRows.push(['Sin otros conceptos', '0', '0 COP', '0.00 USD']);
   } else {
-    otrosItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), it.subtotalUSD.toFixed(2), Math.round(it.subtotalCOP).toLocaleString('es-CO')]));
+    otrosItems.forEach((it) => itemsRows.push([it.name, it.quantity.toString(), `${Math.round(it.subtotalCOP).toLocaleString('es-CO')} COP`, `$${it.subtotalUSD.toFixed(2)} USD`]));
   }
   itemsRows.push([]);
 
   // TOTAL GENERAL
-  itemsRows.push(['TOTAL GENERAL FACTURADO EN ÍTEMS', '', `$${totalItemsUSD.toFixed(2)} USD`, `${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP`]);
+  itemsRows.push(['TOTAL GENERAL FACTURADO EN ÍTEMS', '', `${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP`, `$${totalItemsUSD.toFixed(2)} USD`]);
 
   const itemsData = [
     ['ÍTEMS FACTURADOS EN EL INTERVALO (CONTADO)'],

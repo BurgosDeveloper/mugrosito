@@ -31,8 +31,11 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
     if (!order) return 0;
     return order.items
       .filter((item) => selectedItemIds.includes(item.id))
-      .reduce((total, item) => total + (item.price || 0) * (item.quantity || 1), 0);
-  }, [order, selectedItemIds]);
+      .reduce((total, item) => {
+        const itemPriceCOP = (item.price || 0) >= 100 ? (item.price || 0) : ((item.price || 0) * copRate);
+        return total + itemPriceCOP * (item.quantity || 1);
+      }, 0);
+  }, [order, selectedItemIds, copRate]);
 
   const selectedTotalUSD = copRate > 0 ? selectedTotalCOP / copRate : 0;
   const selectedTotalBs = bsRate > 0 ? selectedTotalCOP / bsRate : 0;
@@ -139,7 +142,8 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
           {order.items.map((item) => {
             const isPaid = item.isPaidIndividually;
             const isSelected = selectedItemIds.includes(item.id);
-            const itemTotalCOP = item.price * item.quantity;
+            const itemUnitCOP = (item.price || 0) >= 100 ? (item.price || 0) : ((item.price || 0) * copRate);
+            const itemTotalCOP = itemUnitCOP * (item.quantity || 1);
 
             return (
               <button
@@ -223,7 +227,7 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
                     {Math.round(itemTotalCOP).toLocaleString('es-CO')} COP
                   </span>
                   <span className="text-xs sm:text-sm font-bold text-gray-500">
-                    {Math.round(item.price || 0).toLocaleString('es-CO')} c/u
+                    {Math.round(itemUnitCOP).toLocaleString('es-CO')} c/u
                   </span>
                 </div>
               </button>

@@ -110,7 +110,11 @@ export const OrderEditModal: React.FC<OrderEditModalProps> = ({
   };
 
   const calculateTotal = (currentItems: OrderItem[]) => {
-    const itemsSum = currentItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
+    const copRate = exchangeRates?.COP || 3100;
+    const itemsSum = currentItems.reduce((sum, item) => {
+      const priceCOP = (item.price || 0) >= 100 ? (item.price || 0) : ((item.price || 0) * copRate);
+      return sum + priceCOP * (item.quantity || 1);
+    }, 0);
     const fee = type === 'delivery' ? (parseFloat(String(deliveryFeeUSD)) || 0) : 0;
     return itemsSum + fee;
   };

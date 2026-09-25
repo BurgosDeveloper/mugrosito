@@ -1592,7 +1592,12 @@ export const CajaPage: React.FC = () => {
                           <span className="px-2.5 py-0.5 rounded-full text-xs font-black uppercase bg-green-100 text-green-900 border border-green-300">
                             💳 {ord.paymentHistory?.map((payment) => payment.paymentMethod).filter((method, index, methods) => methods.indexOf(method) === index).join(' + ') || ord.paymentMethod || 'PAGADO'}
                           </span>
-                          <span className="text-lg font-black text-black block mt-1 bg-yellow-400 px-2 py-0.5 rounded border border-yellow-500 text-center">${ord.totalUSD.toFixed(2)} USD</span>
+                          <span className="text-base font-black text-black block mt-1 bg-yellow-400 px-2.5 py-0.5 rounded border border-yellow-500 text-center">
+                            {Math.round((ord as any).totalCOP || roundCOP(ord.totalUSD * (ord.copRateAtPayment || exchangeRates.COP || 3100))).toLocaleString('es-CO')} COP
+                          </span>
+                          <span className="text-[10px] text-gray-600 font-bold block text-right mt-0.5">
+                            ≈ ${ord.totalUSD.toFixed(2)} USD
+                          </span>
                         </div>
                       </div>
 
@@ -1705,8 +1710,15 @@ export const CajaPage: React.FC = () => {
 
             <div className="p-5 rounded-2xl bg-white border border-gray-200 shadow-xs space-y-2">
               <span className="text-xs text-gray-500 font-bold block uppercase">INGRESOS TOTALES</span>
-              <div className="text-2xl font-black text-black">+${totalIngresosUSD.toFixed(2)} USD</div>
-              <div className="text-xs text-gray-700 font-bold">+{totalIngresosCOP.toLocaleString()} COP | +{totalIngresosBs.toLocaleString()} Bs</div>
+              {(() => {
+                const totalConvertedCOP = totalIngresosCOP + (totalIngresosUSD * exchangeRates.COP) + (exchangeRates.Bs > 0 ? (totalIngresosBs * exchangeRates.Bs) : 0);
+                return (
+                  <>
+                    <div className="text-2xl font-black text-black">+{Math.round(totalConvertedCOP).toLocaleString('es-CO')} COP</div>
+                    <div className="text-xs text-gray-700 font-bold">+${totalIngresosUSD.toFixed(2)} USD | +{totalIngresosCOP.toLocaleString()} COP | +{totalIngresosBs.toLocaleString()} Bs</div>
+                  </>
+                );
+              })()}
               <div className="text-xs text-gray-500 font-medium">Cobros e ingresos manuales por método</div>
             </div>
 
@@ -2199,18 +2211,28 @@ export const CajaPage: React.FC = () => {
               </div>
 
               {/* Tarjetas informativas de recaudación y ventas */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
-                  <span className="text-[10px] font-black uppercase text-gray-500 block">Venta Facturada Turno</span>
-                  <span className="text-base font-black text-black">${paidOrdersToday.reduce((sum, o) => sum + (o.totalUSD || 0), 0).toFixed(2)} USD</span>
-                  <span className="text-[10px] text-gray-500 font-bold block">{paidOrdersToday.length} comanda(s) cobrada(s)</span>
-                </div>
-                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
-                  <span className="text-[10px] font-black uppercase text-gray-500 block">Efectivo Físico en Gaveta</span>
-                  <span className="text-sm font-black text-green-700 block">${saldoEfectivoUSD.toFixed(2)} USD</span>
-                  <span className="text-xs font-black text-green-700 block">{Math.round(saldoEfectivoCOP).toLocaleString()} COP</span>
-                </div>
-              </div>
+              {(() => {
+                const totalVentaCOP = paidOrdersToday.reduce(
+                  (sum, o) => sum + ((o as any).totalCOP || roundCOP((o.totalUSD || 0) * (o.copRateAtPayment || exchangeRates.COP || 3100))),
+                  0
+                );
+                const totalVentaUSD = paidOrdersToday.reduce((sum, o) => sum + (o.totalUSD || 0), 0);
+                return (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                      <span className="text-[10px] font-black uppercase text-gray-500 block">Venta Facturada Turno</span>
+                      <span className="text-base font-black text-black block">{Math.round(totalVentaCOP).toLocaleString('es-CO')} COP</span>
+                      <span className="text-[11px] font-bold text-gray-600 block">≈ ${totalVentaUSD.toFixed(2)} USD</span>
+                      <span className="text-[10px] text-gray-500 font-bold block mt-0.5">{paidOrdersToday.length} comanda(s) cobrada(s)</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                      <span className="text-[10px] font-black uppercase text-gray-500 block">Efectivo Físico en Gaveta</span>
+                      <span className="text-base font-black text-green-700 block">{Math.round(saldoEfectivoCOP).toLocaleString('es-CO')} COP</span>
+                      <span className="text-[11px] font-bold text-green-800 block">≈ ${saldoEfectivoUSD.toFixed(2)} USD</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Indicador de Comandas Pendientes */}
               {activeComandas.length > 0 ? (
@@ -2419,9 +2441,16 @@ export const CajaPage: React.FC = () => {
 
               return (
                 <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
-                  <div className="flex justify-between text-xs text-gray-700">
-                    <span>Total Cobrado:</span>
-                    <span className="font-black text-black text-sm bg-yellow-400 px-2 py-0.5 rounded border border-yellow-500">${historicDetailOrder.totalUSD.toFixed(2)} USD</span>
+                  <div className="flex justify-between items-center text-xs text-gray-700">
+                    <span className="font-bold">Total Cobrado:</span>
+                    <div className="text-right">
+                      <span className="font-black text-black text-sm bg-yellow-400 px-2.5 py-0.5 rounded border border-yellow-500 block">
+                        {Math.round((historicDetailOrder as any).totalCOP || roundCOP(historicDetailOrder.totalUSD * (historicDetailOrder.copRateAtPayment || exchangeRates.COP || 3100))).toLocaleString('es-CO')} COP
+                      </span>
+                      <span className="text-[10px] text-gray-600 font-bold block mt-0.5">
+                        ≈ ${historicDetailOrder.totalUSD.toFixed(2)} USD
+                      </span>
+                    </div>
                   </div>
 
                   <div className="pt-2 border-t border-gray-200 space-y-1">
