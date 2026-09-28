@@ -224,13 +224,13 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     if ((it.cashTenderedCOP || 0) > 0) {
       return sum + Math.max(0, (it.cashTenderedCOP || 0) - (it.changeGivenCOP || 0));
     }
-    const rateCOP = it.copRate || exchangeRates.COP;
+    const rateCOP = it.copRate || exchangeRates.COP || 3100;
     if ((it.cashTenderedUSD || 0) > 0) {
       return sum + Math.max(0, (it.cashTenderedUSD || 0) - (it.changeGivenUSD || 0)) * rateCOP;
     }
     if ((it.cashTenderedBs || 0) > 0) {
-      const rateBs = it.bsRate || exchangeRates.Bs;
-      return sum + (rateBs > 0 ? (Math.max(0, (it.cashTenderedBs || 0) - (it.changeGivenBs || 0)) * rateCOP) / rateBs : 0);
+      const rateBs = it.bsRate || exchangeRates.Bs || 3.2;
+      return sum + Math.max(0, (it.cashTenderedBs || 0) - (it.changeGivenBs || 0)) * rateBs;
     }
     return sum + (it.amountPaidUSD || 0) * rateCOP;
   }, 0);
@@ -256,17 +256,17 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
 
   const copToleranceUSD = exchangeRates.COP > 0 ? (1000 / exchangeRates.COP) : 0.05;
   const isReadyToClose =
-    (Math.max(0, (order?.totalUSD || 0) - fullOrderPaidUSD) <= 0.05 || pendingDebtCOP <= 10) &&
+    (Math.max(0, (order?.totalUSD || 0) - fullOrderPaidUSD) <= 0.05 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25)) &&
     Math.max(0, fullOrderTenderedUSD - (order?.totalUSD || 0) - fullOrderChangeUSD) <= Math.max(0.05, copToleranceUSD);
 
   // Auto-switch to change if debt is settled but change is owed
   useEffect(() => {
     if (!order) return;
-    if ((pendingDebtUSD <= 0.01 || pendingDebtCOP <= 10) && pendingChangeUSD > 0.01 && entryType === 'payment') {
+    if ((pendingDebtUSD <= 0.01 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25)) && (pendingChangeUSD > 0.01 || pendingChangeCOP > 10) && entryType === 'payment') {
       setEntryType('change');
       setAmountLocal('');
     }
-  }, [order, pendingDebtUSD, pendingDebtCOP, pendingChangeUSD, entryType]);
+  }, [order, pendingDebtUSD, pendingDebtCOP, pendingChangeUSD, pendingChangeCOP, entryType]);
 
   const hasSplitPayments = !paymentScope && (
     history.some((p) => Array.isArray(p.itemIds) && p.itemIds.length > 0) ||
@@ -448,14 +448,21 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                       <span className="text-sm sm:text-base text-gray-700 font-bold">Abonado / Recibido:</span>
                       <span className="text-lg sm:text-xl font-black text-blue-700">{Math.round(totalTenderedCOP).toLocaleString('es-CO')}</span>
                     </div>
-                    <div className="flex justify-between items-baseline font-bold">
-                      <span className="text-sm sm:text-base text-gray-700 font-bold">
-                        {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en pesos:'}
-                      </span>
-                      <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
-                        {(pendingChangeUSD > 0.005 ? pendingChangeCOP : totalChangeGivenCOP).toLocaleString('es-CO')}
-                      </span>
-                    </div>
+                    {pendingDebtCOP > 10 ? (
+                      <div className="flex justify-between items-baseline font-bold border-t border-yellow-200/80 pt-1.5">
+                        <span className="text-sm sm:text-base text-red-700 font-black">Resta por cobrar:</span>
+                        <span className="text-lg sm:text-xl font-black text-red-700">{Math.round(pendingDebtCOP).toLocaleString('es-CO')} COP</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-baseline font-bold">
+                        <span className="text-sm sm:text-base text-gray-700 font-bold">
+                          {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en pesos:'}
+                        </span>
+                        <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
+                          {(pendingChangeUSD > 0.005 ? pendingChangeCOP : totalChangeGivenCOP).toLocaleString('es-CO')}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* COLUMN 2: DOLARES */}
@@ -468,14 +475,21 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                       <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
                       <span className="text-lg sm:text-xl font-black text-blue-700">${(tenderedUSD > 0 ? tenderedUSD : paidUSD).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between items-baseline font-bold">
-                      <span className="text-sm sm:text-base text-gray-600 font-bold">
-                        {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en dólares:'}
-                      </span>
-                      <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
-                        ${(pendingChangeUSD > 0.005 ? pendingChangeUSD : changeGivenUSD).toFixed(2)}
-                      </span>
-                    </div>
+                    {pendingDebtUSD > 0.01 ? (
+                      <div className="flex justify-between items-baseline font-bold border-t border-gray-100 pt-1.5">
+                        <span className="text-sm sm:text-base text-red-700 font-black">Resta por cobrar:</span>
+                        <span className="text-lg sm:text-xl font-black text-red-700">${pendingDebtUSD.toFixed(2)} USD</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-baseline font-bold">
+                        <span className="text-sm sm:text-base text-gray-600 font-bold">
+                          {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en dólares:'}
+                        </span>
+                        <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
+                          ${(pendingChangeUSD > 0.005 ? pendingChangeUSD : changeGivenUSD).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* COLUMN 3: BOLIVARES */}
@@ -488,14 +502,21 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                       <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
                       <span className="text-lg sm:text-xl font-black text-blue-700">{totalTenderedBs.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between items-baseline font-bold">
-                      <span className="text-sm sm:text-base text-gray-600 font-bold">
-                        {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en bolívares:'}
-                      </span>
-                      <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
-                        {((pendingChangeUSD > 0.005 ? pendingChangeBs : totalChangeGivenBs)).toFixed(2)}
-                      </span>
-                    </div>
+                    {pendingDebtBs > 0.01 ? (
+                      <div className="flex justify-between items-baseline font-bold border-t border-gray-100 pt-1.5">
+                        <span className="text-sm sm:text-base text-red-700 font-black">Resta por cobrar:</span>
+                        <span className="text-lg sm:text-xl font-black text-red-700">{pendingDebtBs.toFixed(2)} Bs</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-baseline font-bold">
+                        <span className="text-sm sm:text-base text-gray-600 font-bold">
+                          {pendingChangeUSD > 0.005 ? 'Vuelto por dar:' : 'Vueltos en bolívares:'}
+                        </span>
+                        <span className={`text-lg sm:text-xl font-black ${pendingChangeUSD > 0.005 ? 'text-amber-700' : 'text-gray-700'}`}>
+                          {((pendingChangeUSD > 0.005 ? pendingChangeBs : totalChangeGivenBs)).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -590,8 +611,8 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                   </button>
                 ))}
 
-                {((entryType === 'payment' && pendingDebtUSD > 0.01) ||
-                  (entryType === 'change' && pendingChangeUSD > 0.01)) && (
+                {((entryType === 'payment' && (pendingDebtUSD > 0.01 || pendingDebtCOP > 10)) ||
+                  (entryType === 'change' && (pendingChangeUSD > 0.01 || pendingChangeCOP > 10))) && (
                   <button
                     type="button"
                     onClick={fillExactAmount}
@@ -760,7 +781,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                         : isBs
                         ? isChange
                           ? `${(mov.changeGivenBs || 0).toFixed(2)} Bs`
-                          : `${(mov.cashTenderedBs || (mov.amountPaidUSD * rateBs)).toFixed(2)} Bs`
+                          : `${(mov.cashTenderedBs || (rateBs > 0 ? (mov.amountPaidUSD * rateCOP) / rateBs : 0)).toFixed(2)} Bs`
                         : isChange
                         ? `$${(mov.changeGivenUSD || 0).toFixed(2)} USD`
                         : `$${(mov.cashTenderedUSD || mov.amountPaidUSD || 0).toFixed(2)} USD`;
@@ -768,7 +789,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                       const usdEquiv = isChange
                         ? (mov.changeGivenUSD || 0) +
                           (rateCOP > 0 ? (mov.changeGivenCOP || 0) / rateCOP : 0) +
-                          (rateBs > 0 ? (mov.changeGivenBs || 0) / rateBs : 0)
+                          (rateBs > 0 && rateCOP > 0 ? ((mov.changeGivenBs || 0) * rateBs) / rateCOP : 0)
                         : (mov.cashTenderedUSD || 0) > 0
                         ? (mov.cashTenderedUSD || 0)
                         : (mov.cashTenderedCOP || 0) > 0 && rateCOP > 0
@@ -862,12 +883,12 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                     }
                   }}
                   className={`px-8 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider transition-all shadow-md cursor-pointer ${
-                    pendingDebtUSD <= 0.01 && pendingChangeUSD <= 0.01 && !isSubmitting
+                    (pendingDebtUSD <= 0.01 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25)) && pendingChangeUSD <= 0.01 && !isSubmitting
                       ? 'bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 active:scale-95 animate-pulse'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-300'
                   }`}
                   title={
-                    pendingDebtUSD > 0.01
+                    pendingDebtUSD > 0.01 || pendingDebtCOP > 10
                       ? 'Aún falta cubrir la deuda de estos ítems'
                       : pendingChangeUSD > 0.01
                       ? 'Hay vuelto pendiente por entregar'
@@ -876,7 +897,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                 >
                   {isSubmitting
                     ? 'PROCESANDO...'
-                    : pendingDebtUSD > 0.01
+                    : (pendingDebtUSD > 0.01 || pendingDebtCOP > 10)
                     ? 'PAGO INCOMPLETO'
                     : pendingChangeUSD > 0.01
                     ? 'ENTREGAR VUELTO'

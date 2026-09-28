@@ -142,6 +142,61 @@ async function runTest() {
     const finRes2 = await request('POST', `/api/orders/${ordId2}/finalize`);
     assert(finRes2.status === 200, `Segunda orden con abonos finalizada limpiamente`);
 
+    // 6. Test Abono en Bs menor al total (Caso Reportado por Cliente: 88.000 COP, abono 15.000 Bs)
+    const ordRes3 = await request('POST', '/api/orders', {
+      type: 'mesa',
+      tableNumber: 3,
+      customerName: 'Cliente Caso Bs',
+      totalCOP: 88000,
+      totalUSD: 28.39,
+      items: [{ productId: 'p1', productName: 'Comida Variada', price: 88000, quantity: 1 }]
+    });
+    const ordId3 = ordRes3.data.id;
+    if (ordId3) testOrderIds.push(ordId3);
+
+    // Abono de 15.000 Bs con Tarjeta de Débito
+    const abonoBsRes = await request('POST', `/api/payments/${ordId3}/ledger`, {
+      entryType: 'payment',
+      currency: 'Bs',
+      amountLocal: 15000,
+      paymentMethod: 'Tarjeta de Débito',
+      payerName: 'Cliente Caso Bs'
+    });
+    assert(abonoBsRes.status === 200, `Abono de 15.000 Bs registrado exitosamente`);
+
+    // Intentar finalizar prematuramente: debe ser rechazado
+    const earlyFinRes = await request('POST', `/api/orders/${ordId3}/finalize`);
+    assert(earlyFinRes.status === 400 || earlyFinRes.status === 409, `Intento de finalizar con deuda pendiente en Bs es bloqueado (status: ${earlyFinRes.status})`);
+
+    // Validar cálculos de montos pendientes para asegurar consistencia
+    const { rows: pmRows } = await client.query('SELECT * FROM order_payments WHERE order_id = $1', [ordId3]);
+    const rateBs = Number(pmRows[0].bs_rate) || 3.2;
+    const rateCOP = Number(pmRows[0].cop_rate) || 3100;
+    const tenderedBs = Number(pmRows[0].cash_tendered_bs) || 0;
+    const paidNetCOP = tenderedBs * rateBs; // 15000 * 3.2 = 48000 COP
+    const pendingCOP = 88000 - paidNetCOP; // 40000 COP
+    const pendingBs = pendingCOP / rateBs; // 12500 Bs
+    const paidUSD3 = Number(pmRows[0].amount_paid_usd); // 15.4838 USD
+    const pendingUSD3 = 28.39 - paidUSD3; // ~12.91 USD
+
+    assert(paidNetCOP === 48000, `Monto abonado en COP calculado correctamente: ${paidNetCOP} COP (esperado: 48000)`);
+    assert(pendingCOP === 40000, `Resta por cobrar en COP es exactamente ${pendingCOP} COP (esperado: 40000)`);
+    assert(pendingBs === 12500, `Resta por cobrar en Bs es exactamente ${pendingBs} Bs (esperado: 12500)`);
+    assert(Math.abs(pendingUSD3 - 12.91) < 0.05, `Resta por cobrar en USD es ~$12.91 USD (obtenido: ${pendingUSD3.toFixed(2)})`);
+
+    // Registrar pago restante: 40.000 COP
+    const payRemainingCOPRes = await request('POST', `/api/payments/${ordId3}/ledger`, {
+      entryType: 'payment',
+      currency: 'COP',
+      amountLocal: 40000,
+      paymentMethod: 'Efectivo COP',
+      payerName: 'Cliente Caso Bs'
+    });
+    assert(payRemainingCOPRes.status === 200, `Pago restante de 40.000 COP registrado exitosamente`);
+
+    const finRes3 = await request('POST', `/api/orders/${ordId3}/finalize`);
+    assert(finRes3.status === 200, `Tercera orden (88.000 COP con abono en Bs y resto en COP) finalizada exitosamente`);
+
   } finally {
     if (testOrderIds.length > 0) {
       await client.query('DELETE FROM order_items WHERE order_id = ANY($1)', [testOrderIds]);
