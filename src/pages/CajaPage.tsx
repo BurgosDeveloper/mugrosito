@@ -2144,7 +2144,7 @@ export const CajaPage: React.FC = () => {
 
       {splitPaymentSelectionOrder && (
         <SplitPaymentSelectionModal
-          key={`${splitPaymentSelectionOrder.id}-${splitPaymentScope?.payerName || 'nuevo'}`}
+          key={`${splitPaymentSelectionOrder.id}-${isEditingSplitPayment ? 'edit' : 'nuevo'}-${splitPaymentScope?.payerName || 'init'}`}
           order={orders.find((order) => order.id === splitPaymentSelectionOrder.id) || splitPaymentSelectionOrder}
           initialPayerName={splitPaymentScope?.payerName}
           initialItemIds={splitPaymentScope?.itemIds}

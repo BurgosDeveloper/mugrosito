@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IoCheckmarkCircle, IoClose, IoPersonOutline, IoReceiptOutline } from 'react-icons/io5';
 import { Order } from '../data/mockData';
@@ -21,13 +21,8 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
   onConfirm,
   exchangeRates = { COP: 3100, Bs: 3.2 },
 }) => {
-  const [payerName, setPayerName] = useState(initialPayerName);
-  const [selectedItemIds, setSelectedItemIds] = useState<string[]>(initialItemIds);
-
-  useEffect(() => {
-    setPayerName(initialPayerName || '');
-    setSelectedItemIds(initialItemIds || []);
-  }, [initialPayerName, initialItemIds, order?.id]);
+  const [payerName, setPayerName] = useState(initialPayerName || '');
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>(() => initialItemIds || []);
 
   const copRate = exchangeRates?.COP || 3100;
   const bsRate = exchangeRates?.Bs || 3.2;
