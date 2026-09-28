@@ -827,6 +827,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'POST',
     });
     const data = await requireApiSuccess(res, 'No se pudo preparar la división de ítems.');
+    if (data.order) {
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)));
+    }
     return data.order;
   };
 

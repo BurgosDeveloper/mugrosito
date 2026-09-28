@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IoCheckmarkCircle, IoClose, IoPersonOutline, IoReceiptOutline } from 'react-icons/io5';
 import { Order } from '../data/mockData';
@@ -24,6 +24,11 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
   const [payerName, setPayerName] = useState(initialPayerName);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>(initialItemIds);
 
+  useEffect(() => {
+    setPayerName(initialPayerName || '');
+    setSelectedItemIds(initialItemIds || []);
+  }, [initialPayerName, initialItemIds, order?.id]);
+
   const copRate = exchangeRates?.COP || 3100;
   const bsRate = exchangeRates?.Bs || 3.2;
 
@@ -43,6 +48,8 @@ export const SplitPaymentSelectionModal: React.FC<SplitPaymentSelectionModalProp
   if (!order) return null;
 
   const toggleItem = (itemId: string) => {
+    const item = order.items.find((it) => it.id === itemId);
+    if (item?.isPaidIndividually) return;
     setSelectedItemIds((current) =>
       current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]
     );

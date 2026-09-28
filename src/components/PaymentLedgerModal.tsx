@@ -48,6 +48,7 @@ interface PaymentLedgerModalProps {
     itemIds: string[];
   };
   onEditPaymentScope?: (order: Order) => void;
+  onNextPayer?: (order: Order) => void;
 }
 
 export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
@@ -56,6 +57,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   onViewOrder,
   paymentScope,
   onEditPaymentScope,
+  onNextPayer,
 }) => {
   const {
     orders,
@@ -112,6 +114,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   }, [order, paymentScope?.payerName]);
 
   const liveOrder = orders.find((o: Order) => o.id === order?.id) || order;
+  const currentOrder = liveOrder || order;
   const [localHistory, setLocalHistory] = useState<Order['paymentHistory']>(order?.paymentHistory || []);
 
   useEffect(() => {
@@ -248,30 +251,79 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
   const pendingChangeCOP = Math.max(0, totalTenderedCOP - scopeTotalCOP - totalChangeGivenCOP);
   const pendingChangeBs = exchangeRates.Bs > 0 ? (pendingChangeCOP / exchangeRates.Bs) : 0;
 
+  const isScopedDebtSettled =
+    pendingDebtUSD <= 0.01 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25);
+  const isScopedChangeSettled =
+    pendingChangeUSD <= 0.01 && pendingChangeCOP <= 10;
+  const isScopedFullySettled = isScopedDebtSettled && isScopedChangeSettled;
+
+  // Ítems de la comanda pendientes de cobro (que no hayan sido pagados individualmente ni en el scope actual saldado)
+  const remainingUnpaidItems = currentItems.filter((item) => {
+    if (item.isPaidIndividually) return false;
+    if (paymentScope && paymentScope.itemIds.includes(item.id)) {
+      return !isScopedDebtSettled;
+    }
+    return true;
+  });
+  const hasRemainingUnpaidItems = remainingUnpaidItems.length > 0;
+
+  const fullOrderTotalUSD = liveOrder?.totalUSD ?? order?.totalUSD ?? 0;
+  const fullOrderTotalCOP = liveOrder?.totalCOP ?? order?.totalCOP ?? Math.round(fullOrderTotalUSD * exchangeRates.COP);
+
   const fullOrderPaidUSD = history.reduce((total, item) => total + (item.amountPaidUSD || 0), 0);
   const fullOrderTenderedUSD = history.reduce((total, item) => total + getEntryTenderedUSD(item), 0);
   const fullOrderChangeUSD = history.reduce((total, item) => total + getEntryChangeUSD(item), 0);
 
+  const fullOrderPaidNetCOP = history.reduce((sum, it) => {
+    if ((it.cashTenderedCOP || 0) > 0) {
+      return sum + Math.max(0, (it.cashTenderedCOP || 0) - (it.changeGivenCOP || 0));
+    }
+    const rateCOP = it.copRate || exchangeRates.COP || 3100;
+    if ((it.cashTenderedUSD || 0) > 0) {
+      return sum + Math.max(0, (it.cashTenderedUSD || 0) - (it.changeGivenUSD || 0)) * rateCOP;
+    }
+    if ((it.cashTenderedBs || 0) > 0) {
+      const rateBs = it.bsRate || exchangeRates.Bs || 3.2;
+      return sum + Math.max(0, (it.cashTenderedBs || 0) - (it.changeGivenBs || 0)) * rateBs;
+    }
+    return sum + (it.amountPaidUSD || 0) * rateCOP;
+  }, 0);
+
+  const fullOrderPendingDebtCOP = Math.max(0, fullOrderTotalCOP - fullOrderPaidNetCOP);
+  const fullOrderPendingDebtUSD = Math.max(0, fullOrderTotalUSD - fullOrderPaidUSD);
+
   const entryUSD = asUSD(Number(amountLocal) || 0, currency, exchangeRates.COP, exchangeRates.Bs);
 
   const copToleranceUSD = exchangeRates.COP > 0 ? (1000 / exchangeRates.COP) : 0.05;
-  const isReadyToClose =
-    (Math.max(0, (order?.totalUSD || 0) - fullOrderPaidUSD) <= 0.05 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25)) &&
-    Math.max(0, fullOrderTenderedUSD - (order?.totalUSD || 0) - fullOrderChangeUSD) <= Math.max(0.05, copToleranceUSD);
+
+  const isSplitOrder = Boolean(
+    paymentScope ||
+    history.some((p) => Array.isArray(p.itemIds) && p.itemIds.length > 0) ||
+    currentItems.some((it) => it.isPaidIndividually)
+  );
+
+  const isFullOrderDebtSettled =
+    fullOrderPendingDebtUSD <= 0.05 || (fullOrderPendingDebtCOP <= 500 && fullOrderPendingDebtUSD <= 0.25);
+  const isFullOrderChangeSettled =
+    Math.max(0, fullOrderTenderedUSD - fullOrderTotalUSD - fullOrderChangeUSD) <= Math.max(0.05, copToleranceUSD);
+
+  const isReadyToCloseFullOrder =
+    isFullOrderDebtSettled &&
+    isFullOrderChangeSettled &&
+    (!isSplitOrder || (!hasRemainingUnpaidItems && isScopedFullySettled));
+
+  const isReadyToClose = isReadyToCloseFullOrder;
 
   // Auto-switch to change if debt is settled but change is owed
   useEffect(() => {
     if (!order) return;
-    if ((pendingDebtUSD <= 0.01 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25)) && (pendingChangeUSD > 0.01 || pendingChangeCOP > 10) && entryType === 'payment') {
+    if (isScopedDebtSettled && (pendingChangeUSD > 0.01 || pendingChangeCOP > 10) && entryType === 'payment') {
       setEntryType('change');
       setAmountLocal('');
     }
-  }, [order, pendingDebtUSD, pendingDebtCOP, pendingChangeUSD, pendingChangeCOP, entryType]);
+  }, [order, isScopedDebtSettled, pendingChangeUSD, pendingChangeCOP, entryType]);
 
-  const hasSplitPayments = !paymentScope && (
-    history.some((p) => Array.isArray(p.itemIds) && p.itemIds.length > 0) ||
-    currentItems.some((it) => it.isPaidIndividually)
-  );
+  const hasSplitPayments = !paymentScope && isSplitOrder && hasRemainingUnpaidItems;
 
   if (!order) return null;
 
@@ -391,6 +443,15 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                 Comanda #{order.orderNumber.replace(/^#+/, '')}
               </span>
             </h2>
+            {paymentScope && (
+              <span className="bg-blue-600 text-white px-3 py-1 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1.5 shadow-xs">
+                <span>👥 Cobrando a:</span>
+                <span className="underline underline-offset-2">{paymentScope.payerName}</span>
+                <span className="bg-blue-800/80 px-2 py-0.5 rounded-md text-[11px] font-bold">
+                  {scopedItems.length} producto{scopedItems.length === 1 ? '' : 's'}
+                </span>
+              </span>
+            )}
             {order.customerName && (
               <span className="text-xs sm:text-sm bg-stone-100 text-gray-900 px-3 py-1 rounded-lg font-black border border-gray-300">
                 👤 {order.customerName}
@@ -412,9 +473,19 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5">
+            {paymentScope && onEditPaymentScope && (
+              <button
+                type="button"
+                onClick={() => onEditPaymentScope(currentOrder)}
+                className="px-3.5 py-1.5 rounded-xl bg-yellow-100 hover:bg-yellow-400 text-yellow-900 hover:text-black text-xs sm:text-sm font-black border border-yellow-300 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Cambiar los ítems asignados a esta persona"
+              >
+                <span>✏️ Cambiar Ítems</span>
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => (paymentScope && onEditPaymentScope ? onEditPaymentScope(order) : onViewOrder(order))}
+              onClick={() => onViewOrder(currentOrder)}
               className="px-3.5 py-1.5 rounded-xl bg-stone-100 hover:bg-yellow-400 hover:text-black text-gray-800 text-xs sm:text-sm font-black border border-gray-300 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <IoEyeOutline className="text-base" />
@@ -441,9 +512,16 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                   {/* COLUMN 1: PESOS (DESTACADO PRINCIPAL) */}
                   <div className="p-4 sm:p-6 rounded-2xl bg-yellow-50/60 border-2 border-yellow-400 ring-2 ring-yellow-400/40 shadow-sm space-y-2">
                     <div className="flex justify-between items-baseline font-bold text-gray-700">
-                      <span className="text-base sm:text-lg font-black text-gray-900">Total en pesos (COP):</span>
+                      <span className="text-base sm:text-lg font-black text-gray-900">
+                        {paymentScope ? `Total ${paymentScope.payerName} (COP):` : 'Total en pesos (COP):'}
+                      </span>
                       <span className="text-2xl sm:text-3xl font-black text-black">{scopeTotalCOP.toLocaleString('es-CO')}</span>
                     </div>
+                    {paymentScope && (
+                      <div className="text-[11px] sm:text-xs font-black text-gray-500">
+                        Comanda total: {Math.round(fullOrderTotalCOP).toLocaleString('es-CO')} COP {hasRemainingUnpaidItems && `(${remainingUnpaidItems.length} ítem(s) restante(s))`}
+                      </div>
+                    )}
                     <div className="flex justify-between items-baseline font-bold">
                       <span className="text-sm sm:text-base text-gray-700 font-bold">Abonado / Recibido:</span>
                       <span className="text-lg sm:text-xl font-black text-blue-700">{Math.round(totalTenderedCOP).toLocaleString('es-CO')}</span>
@@ -468,9 +546,16 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                   {/* COLUMN 2: DOLARES */}
                   <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
                     <div className="flex justify-between items-baseline font-bold text-gray-700">
-                      <span className="text-base sm:text-lg font-black text-gray-800">Total en dólares (USD):</span>
+                      <span className="text-base sm:text-lg font-black text-gray-800">
+                        {paymentScope ? `Total ${paymentScope.payerName} (USD):` : 'Total en dólares (USD):'}
+                      </span>
                       <span className="text-2xl sm:text-3xl font-black text-black">${scopeTotalUSD.toFixed(2)}</span>
                     </div>
+                    {paymentScope && (
+                      <div className="text-[11px] sm:text-xs font-black text-gray-500">
+                        Comanda total: ${fullOrderTotalUSD.toFixed(2)} USD
+                      </div>
+                    )}
                     <div className="flex justify-between items-baseline font-bold">
                       <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
                       <span className="text-lg sm:text-xl font-black text-blue-700">${(tenderedUSD > 0 ? tenderedUSD : paidUSD).toFixed(2)}</span>
@@ -495,9 +580,16 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                   {/* COLUMN 3: BOLIVARES */}
                   <div className="p-4 sm:p-6 rounded-2xl bg-white border-2 border-gray-200 shadow-sm space-y-2">
                     <div className="flex justify-between items-baseline font-bold text-gray-700">
-                      <span className="text-base sm:text-lg font-black text-gray-800">Total en bolívares (Bs):</span>
+                      <span className="text-base sm:text-lg font-black text-gray-800">
+                        {paymentScope ? `Total ${paymentScope.payerName} (Bs):` : 'Total en bolívares (Bs):'}
+                      </span>
                       <span className="text-2xl sm:text-3xl font-black text-black">{scopeTotalBs.toFixed(2)}</span>
                     </div>
+                    {paymentScope && (
+                      <div className="text-[11px] sm:text-xs font-black text-gray-500">
+                        Comanda total: {(exchangeRates.Bs > 0 ? fullOrderTotalCOP / exchangeRates.Bs : 0).toFixed(2)} Bs
+                      </div>
+                    )}
                     <div className="flex justify-between items-baseline font-bold">
                       <span className="text-sm sm:text-base text-gray-600 font-bold">Abonado / Recibido:</span>
                       <span className="text-lg sm:text-xl font-black text-blue-700">{totalTenderedBs.toFixed(2)}</span>
@@ -524,15 +616,19 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   {(pendingDebtUSD > 0.01 || pendingDebtCOP > 10) ? (
                     <span className="text-base sm:text-lg font-black text-red-700 bg-red-50 border-2 border-red-300 px-5 py-2.5 rounded-2xl shadow-xs">
-                      ⚠️ Pendiente por cobrar: {Math.round(pendingDebtCOP).toLocaleString('es-CO')} COP (≈ ${pendingDebtUSD.toFixed(2)} USD / {pendingDebtBs.toFixed(2)} Bs)
+                      ⚠️ Pendiente por cobrar {paymentScope ? `a ${paymentScope.payerName}` : ''}: {Math.round(pendingDebtCOP).toLocaleString('es-CO')} COP (≈ ${pendingDebtUSD.toFixed(2)} USD / {pendingDebtBs.toFixed(2)} Bs)
                     </span>
                   ) : pendingChangeUSD > 0.01 ? (
                     <span className="text-base sm:text-lg font-black text-amber-900 bg-amber-100 border-2 border-amber-300 px-5 py-2.5 rounded-2xl animate-pulse shadow-xs">
-                      💵 Vuelto pendiente por entregar: {pendingChangeCOP.toLocaleString('es-CO')} COP (≈ ${pendingChangeUSD.toFixed(2)} USD / {pendingChangeBs.toFixed(2)} Bs)
+                      💵 Vuelto pendiente {paymentScope ? `para ${paymentScope.payerName}` : ''}: {pendingChangeCOP.toLocaleString('es-CO')} COP (≈ ${pendingChangeUSD.toFixed(2)} USD / {pendingChangeBs.toFixed(2)} Bs)
                     </span>
                   ) : (
                     <span className="text-base sm:text-lg font-black text-green-800 bg-green-50 border-2 border-green-300 px-5 py-2.5 rounded-2xl shadow-xs">
-                      ✅ Cuenta completamente cubierta y balanceada
+                      {paymentScope
+                        ? hasRemainingUnpaidItems
+                          ? `✅ Cuenta de ${paymentScope.payerName} completamente cubierta y balanceada (Restan ${remainingUnpaidItems.length} producto(s) por cobrar en la comanda)`
+                          : `✅ Cuenta de ${paymentScope.payerName} cubierta. ¡Todos los productos y comensales saldados al 100%!`
+                        : '✅ Cuenta completamente cubierta y balanceada'}
                     </span>
                   )}
 
@@ -575,7 +671,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
               {onEditPaymentScope && (
                 <button
                   type="button"
-                  onClick={() => onEditPaymentScope(order)}
+                  onClick={() => onEditPaymentScope(currentOrder)}
                   className="px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs sm:text-sm rounded-xl border border-yellow-500 shadow-xs shrink-0 cursor-pointer"
                 >
                   IR A X PERSONAS
@@ -863,7 +959,7 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
             </button>
 
             {paymentScope ? (
-              isReadyToClose ? (
+              isReadyToCloseFullOrder ? (
                 <button
                   type="button"
                   disabled={isSubmitting}
@@ -875,47 +971,50 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
               ) : (
                 <button
                   type="button"
-                  disabled={pendingDebtUSD > 0.01 || pendingChangeUSD > 0.01 || isSubmitting}
+                  disabled={!isScopedFullySettled || isSubmitting}
                   onClick={() => {
-                    onClose();
-                    if (onEditPaymentScope && order) {
-                      onEditPaymentScope(order);
+                    if (onNextPayer && currentOrder) {
+                      onNextPayer(currentOrder);
+                    } else if (onEditPaymentScope && currentOrder) {
+                      onEditPaymentScope(currentOrder);
+                    } else {
+                      onClose();
                     }
                   }}
                   className={`px-8 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider transition-all shadow-md cursor-pointer ${
-                    (pendingDebtUSD <= 0.01 || (pendingDebtCOP <= 500 && pendingDebtUSD <= 0.25)) && pendingChangeUSD <= 0.01 && !isSubmitting
+                    isScopedFullySettled && !isSubmitting
                       ? 'bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 active:scale-95 animate-pulse'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-300'
                   }`}
                   title={
-                    pendingDebtUSD > 0.01 || pendingDebtCOP > 10
-                      ? 'Aún falta cubrir la deuda de estos ítems'
-                      : pendingChangeUSD > 0.01
-                      ? 'Hay vuelto pendiente por entregar'
-                      : 'Continuar cobrando a las siguientes personas'
+                    !isScopedDebtSettled
+                      ? `Aún falta cubrir la deuda de los ítems de ${paymentScope.payerName}`
+                      : !isScopedChangeSettled
+                      ? `Hay vuelto pendiente por entregar a ${paymentScope.payerName}`
+                      : `Continuar cobrando a las siguientes personas (${remainingUnpaidItems.length} producto(s) restante(s))`
                   }
                 >
                   {isSubmitting
                     ? 'PROCESANDO...'
-                    : (pendingDebtUSD > 0.01 || pendingDebtCOP > 10)
+                    : !isScopedDebtSettled
                     ? 'PAGO INCOMPLETO'
-                    : pendingChangeUSD > 0.01
+                    : !isScopedChangeSettled
                     ? 'ENTREGAR VUELTO'
-                    : '👥 LISTO / COBRAR SIGUIENTE PERSONA'}
+                    : `👥 LISTO / COBRAR SIGUIENTE PERSONA (${remainingUnpaidItems.length})`}
                 </button>
               )
             ) : (
               <button
                 type="button"
-                disabled={!isReadyToClose || isSubmitting || hasSplitPayments}
+                disabled={!isReadyToCloseFullOrder || isSubmitting || hasSplitPayments}
                 onClick={handleFinalize}
                 className={`px-10 py-4 rounded-xl text-base sm:text-lg font-black uppercase tracking-wider transition-all shadow-md cursor-pointer ${
-                  isReadyToClose && !isSubmitting && !hasSplitPayments
+                  isReadyToCloseFullOrder && !isSubmitting && !hasSplitPayments
                     ? 'bg-yellow-400 hover:bg-yellow-500 text-black border-2 border-yellow-500 active:scale-95'
                     : 'bg-gray-300 text-gray-500 cursor-not-allowed border-2 border-gray-300'
                 }`}
               >
-                {isSubmitting ? 'PROCESANDO...' : 'FINALIZAR COBRO'}
+                {isSubmitting ? 'PROCESANDO...' : isSplitOrder ? 'FINALIZAR COMANDA COMPLETA' : 'FINALIZAR COBRO'}
               </button>
             )}
           </div>

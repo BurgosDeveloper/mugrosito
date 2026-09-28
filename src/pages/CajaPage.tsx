@@ -218,16 +218,40 @@ export const CajaPage: React.FC = () => {
   const { mergeOrders } = useApp();
 
   const handleOpenPayModal = (order: Order) => {
-    const hasSplit = (order.paymentHistory || []).some(
+    const freshOrder = orders.find((o) => o.id === order.id) || order;
+    const hasSplit = (freshOrder.paymentHistory || []).some(
       (p) => Array.isArray(p.itemIds) && p.itemIds.length > 0
-    ) || (order.items || []).some((it) => it.isPaidIndividually);
+    ) || (freshOrder.items || []).some((it) => it.isPaidIndividually);
 
-    if (hasSplit) {
-      handleOpenSplitItemsModal(order);
+    const hasUnpaidItems = (freshOrder.items || []).some((it) => !it.isPaidIndividually);
+
+    if (hasSplit && hasUnpaidItems) {
+      handleOpenSplitItemsModal(freshOrder);
       return;
     }
     setSplitPaymentScope(null);
-    setActiveOrderForPay(order);
+    setActiveOrderForPay(freshOrder);
+  };
+
+  const handleNextSplitPaymentPerson = async (order: Order) => {
+    setActiveOrderForPay(null);
+    setSplitPaymentScope(null);
+    setIsEditingSplitPayment(false);
+
+    const targetOrder = orders.find((o) => o.id === order.id) || order;
+    const hasMultiQuantity = (targetOrder.items || []).some((it) => (Number(it.quantity) || 1) > 1);
+    if (hasMultiQuantity && expandOrderItemsForSplit) {
+      try {
+        const expanded = await expandOrderItemsForSplit(targetOrder.id);
+        if (expanded) {
+          setSplitPaymentSelectionOrder(expanded);
+          return;
+        }
+      } catch (err) {
+        console.warn('Aviso: no se pudo expandir ítems en siguiente persona:', err);
+      }
+    }
+    setSplitPaymentSelectionOrder(targetOrder);
   };
 
   const handleToggleOrderForMultiPay = (id: string) => {
@@ -2113,12 +2137,14 @@ export const CajaPage: React.FC = () => {
           onClose={handleClosePaymentLedger}
           onViewOrder={(order) => setOrderDetailModalOrder(order)}
           paymentScope={splitPaymentScope || undefined}
-          onEditPaymentScope={splitPaymentScope ? handleEditSplitPaymentSelection : undefined}
+          onEditPaymentScope={splitPaymentScope ? handleEditSplitPaymentSelection : handleOpenSplitItemsModal}
+          onNextPayer={handleNextSplitPaymentPerson}
         />
       )}
 
       {splitPaymentSelectionOrder && (
         <SplitPaymentSelectionModal
+          key={`${splitPaymentSelectionOrder.id}-${splitPaymentScope?.payerName || 'nuevo'}`}
           order={orders.find((order) => order.id === splitPaymentSelectionOrder.id) || splitPaymentSelectionOrder}
           initialPayerName={splitPaymentScope?.payerName}
           initialItemIds={splitPaymentScope?.itemIds}
