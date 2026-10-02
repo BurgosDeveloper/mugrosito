@@ -312,6 +312,7 @@ module.exports = function(io) {
 
       const { COP: copRate, Bs: bsRate } = await getRatesForShift(client, req.user.shift);
       const totalUSD = Number(order.total_usd) || 0;
+      const totalCOP = Number(order.total_cop) || (copRate > 0 ? Math.round(totalUSD * copRate) : 0);
 
       // Liberar mesa si corresponde antes de desligarla (las comandas a crédito no bloquean mesas)
       if (order.type === 'mesa' && order.table_number) {
@@ -330,6 +331,7 @@ module.exports = function(io) {
           payment_status = 'credito',
           payment_method = 'Crédito',
           paid_amount_usd = $6,
+          total_cop = COALESCE(NULLIF(total_cop, 0), $7),
           type = 'credito',
           table_number = NULL,
           customer_name = $1,
@@ -338,15 +340,19 @@ module.exports = function(io) {
           notes = CASE WHEN notes IS NULL OR notes = '' THEN $4 ELSE notes || ' | ' || $4 END,
           updated_at = CURRENT_TIMESTAMP
          WHERE id = $5`,
-        [cleanDebtorName, copRate, bsRate, `Cuenta a Crédito: ${cleanDebtorName}${notes ? ' - ' + notes : ''}`, id, totalUSD]
+        [cleanDebtorName, copRate, bsRate, `Cuenta a Crédito: ${cleanDebtorName}${notes ? ' - ' + notes : ''}`, id, totalUSD, totalCOP]
       );
+
+      // Obtener todos los IDs de items de la comanda para asociarlos al crédito
+      const { rows: orderItemRows } = await client.query('SELECT id FROM order_items WHERE order_id = $1', [id]);
+      const orderItemIds = orderItemRows.map((it) => it.id);
 
       const paymentId = `pm-cred-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await client.query(
         `INSERT INTO order_payments
           (id, order_id, payer_name, payment_method, amount_paid_usd, cash_tendered_usd, cash_tendered_cop, cash_tendered_bs, change_given_usd, change_given_cop, change_given_bs, item_ids, cop_rate, bs_rate)
-         VALUES ($1, $2, $3, 'Crédito', $4, 0, 0, 0, 0, 0, 0, $5, $6, $7)`,
-        [paymentId, id, cleanDebtorName, totalUSD, [], copRate, bsRate]
+         VALUES ($1, $2, $3, 'Crédito', $4, 0, $5, 0, 0, 0, 0, $6, $7, $8)`,
+        [paymentId, id, cleanDebtorName, totalUSD, totalCOP, orderItemIds, copRate, bsRate]
       );
 
       await client.query(

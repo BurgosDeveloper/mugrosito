@@ -200,9 +200,12 @@ export class ReportService {
   }
 
   private paymentCurrency(method: string): 'USD' | 'COP' | 'Bs' {
-    if (['Efectivo COP', 'Bancolombia', 'Nequi', 'Binance COP'].includes(method)) return 'COP';
-    if (['Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito'].includes(method)) return 'Bs';
-    return 'USD';
+    if (!method) return 'COP';
+    const m = String(method).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (m.includes('cop') || m.includes('bancolombia') || m.includes('nequi') || m.includes('credito')) return 'COP';
+    if (m.includes('bs') || m.includes('movil') || m.includes('debito') || m.includes('tarjeta')) return 'Bs';
+    if (m.includes('zelle') || m.includes('binance') || m.includes('usd') || m.includes('dolar')) return 'USD';
+    return 'COP';
   }
 
   private registeredPaymentAmounts(payment: ReporteIntervaloData['payments'][number]) {
@@ -288,7 +291,7 @@ export class ReportService {
 
   // 1. Reporte de Hot Dogs e Ítems Vendidos
   generateProductsSoldReport(orders: Order[], rates: ExchangeRates) {
-    const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
+    const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || (o as any).type === 'credito');
     const tally: Record<string, { qty: number; revenueUSD: number; revenueCOP: number; category: string }> = {};
 
     paidOrders.forEach((o) => {
@@ -453,8 +456,8 @@ export class ReportService {
 
   // 2. Reporte de Ingresos y Cobros
   generateIncomeReport(orders: Order[], rates: ExchangeRates) {
-    const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado');
-    const creditOrders = orders.filter((o) => o.paymentStatus === 'credito');
+    const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado' && o.paymentMethod !== 'Crédito' && (o as any).type !== 'credito');
+    const creditOrders = orders.filter((o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || (o as any).type === 'credito');
     const totalUSD = paidOrders.reduce((sum, o) => sum + o.totalUSD, 0);
     const totalCreditUSD = creditOrders.reduce((sum, o) => sum + o.totalUSD, 0);
 
@@ -903,7 +906,7 @@ export class ReportService {
 
   // 4. Reporte de Hamburguesas e Ítems Vendidos por Intervalo
   generateProductsSoldIntervalReport(data: ReporteIntervaloData) {
-    const billedOrders = (data.orders || []).filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
+    const billedOrders = (data.orders || []).filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || (o as any).type === 'credito');
     const billedOrderIds = new Set(billedOrders.map((o) => o.id));
     const cashItems = (data.items || []).filter((it) => billedOrderIds.has(it.orderId));
 
@@ -1113,11 +1116,43 @@ export class ReportService {
     const billedTotals = { usd: 0, cop: 0, bs: 0 };
     const paymentsByOrder = new Map<string, ReporteIntervaloData['payments']>();
 
-    data.payments.forEach((payment) => {
+    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+
+    const paymentsList = [...data.payments];
+    data.orders.forEach((ord) => {
+      const isCredit = ord.paymentStatus === 'credito' || ord.paymentMethod === 'Crédito' || (ord as any).type === 'credito';
+      const isPaid = ord.paymentStatus === 'pagado';
+      if ((isCredit || isPaid) && !paymentsList.some((p) => p.orderId === ord.id)) {
+        const method = isCredit ? 'Crédito' : (ord.paymentMethod || 'Efectivo COP');
+        const oUSD = Number(ord.totalUSD) || 0;
+        const oRate = Number(ord.copRateAtPayment) || copRateGlobal;
+        const oCOP = Number(ord.totalCOP) || Math.round(oUSD * oRate);
+        paymentsList.push({
+          id: `pm-synth-${ord.id}`,
+          orderId: ord.id,
+          orderNumber: ord.orderNumber,
+          payerName: ord.customerName || 'Cliente General',
+          paymentMethod: method,
+          amountPaidUSD: oUSD,
+          cashTenderedUSD: method === 'Efectivo USD' ? oUSD : 0,
+          cashTenderedCOP: (method === 'Crédito' || method.includes('COP') || method.includes('Bancolombia') || method.includes('Nequi')) ? oCOP : 0,
+          cashTenderedBs: (method.includes('Bs') || method.includes('Móvil') || method.includes('Débito') || method.includes('Tarjeta')) ? (bsRateGlobal > 0 ? oCOP / bsRateGlobal : 0) : 0,
+          changeGivenUSD: 0,
+          changeGivenCOP: 0,
+          changeGivenBs: 0,
+          copRate: oRate,
+          bsRate: Number(ord.bsRateAtPayment) || bsRateGlobal,
+          createdAt: ord.createdAt,
+        });
+      }
+    });
+
+    paymentsList.forEach((payment) => {
       const method = payment.paymentMethod || 'Efectivo USD';
       const curr = this.paymentCurrency(method);
-      const cRate = Number(payment.copRate) || Number(data.exchangeRates?.COP) || 3100;
-      const bRate = Number(payment.bsRate) || Number(data.exchangeRates?.Bs) || 3.2;
+      const cRate = Number(payment.copRate) || copRateGlobal;
+      const bRate = Number(payment.bsRate) || bsRateGlobal;
 
       const paidUSD = Number(payment.amountPaidUSD) || 0;
       let tenderUSD = Number(payment.cashTenderedUSD) || 0;
@@ -1203,9 +1238,6 @@ export class ReportService {
     });
 
     // Calcular Venta Neta por método y equivalente USD
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
-
     methodTotals.forEach((val) => {
       val.netNative = val.incomeNative - val.changeNative;
       if (val.currency === 'USD') val.netUSD = val.netNative;
@@ -1213,11 +1245,10 @@ export class ReportService {
       else if (val.currency === 'Bs') val.netUSD = (val.netNative * bsRateGlobal) / copRateGlobal;
     });
 
-
-    // Separación Estricta de Contado y Crédito
-    const creditOrders = data.orders.filter((order) => order.paymentStatus === 'credito' || order.paymentMethod === 'Crédito');
-    const cashOrders = data.orders.filter((order) => order.paymentStatus === 'pagado' && order.paymentMethod !== 'Crédito');
-    const billedOrders = data.orders.filter((order) => order.paymentStatus === 'pagado' || order.paymentStatus === 'credito');
+    // Separación Estricta de Contado y Crédito (100% de dinero e ítems asegurados)
+    const creditOrders = data.orders.filter((order) => order.paymentStatus === 'credito' || order.paymentMethod === 'Crédito' || (order as any).type === 'credito');
+    const cashOrders = data.orders.filter((order) => order.paymentStatus === 'pagado' && order.paymentMethod !== 'Crédito' && (order as any).type !== 'credito');
+    const billedOrders = data.orders.filter((order) => order.paymentStatus === 'pagado' || order.paymentStatus === 'credito' || order.paymentMethod === 'Crédito' || (order as any).type === 'credito');
     const billedOrderIds = new Set(billedOrders.map((o) => o.id));
     const cashItems = data.items.filter((item) => billedOrderIds.has(item.orderId));
 
@@ -1276,6 +1307,8 @@ export class ReportService {
 
     // Desglose de Créditos y Cuentas por Cobrar
     const totalCreditUSD = creditOrders.reduce((sum, o) => sum + (o.totalUSD || 0), 0);
+    const totalCreditCOP = creditOrders.reduce((sum, o) => sum + (Number((o as any).totalCOP) || roundCOP((o.totalUSD || 0) * (o.copRateAtPayment || copRateGlobal))), 0);
+    const totalContadoCOP = Math.max(0, totalVentaFacturadaCOP - totalCreditCOP);
     const creditRows = creditOrders.map((ord) => {
       const orderItems = data.items
         .filter((it) => it.orderId === ord.id)
@@ -1383,8 +1416,16 @@ export class ReportService {
             <td>🇻🇪 Bolívares (Bs)</td>
             <td style="text-align:right; font-weight:700;">Bs ${billedTotals.bs.toFixed(2)}</td>
           </tr>
+          <tr style="background:#f9fafb; border-top:1px solid #e5e7eb;">
+            <td><strong>Ventas al Contado (Recaudado Efectivo / Cuentas):</strong></td>
+            <td style="text-align:right; font-weight:700;">$${Math.round(totalContadoCOP).toLocaleString('es-CO')} COP</td>
+          </tr>
+          <tr style="background:#fffbeb;">
+            <td><strong style="color:#92400e;">Ventas a Crédito (Cuentas por Cobrar):</strong></td>
+            <td style="text-align:right; font-weight:700; color:#b45309;">$${Math.round(totalCreditCOP).toLocaleString('es-CO')} COP</td>
+          </tr>
           <tr style="background:#ecfdf5; border-top:2px solid #059669;">
-            <td><strong style="color:#065f46; font-size:11.5px;">VENTA TOTAL EN PESOS (FACTURADO):</strong></td>
+            <td><strong style="color:#065f46; font-size:11.5px;">VENTA TOTAL EN PESOS (CONTADO + CRÉDITO):</strong></td>
             <td style="text-align:right; font-weight:900; color:#047857; font-size:14px;">
               ${Math.round(totalVentaFacturadaCOP).toLocaleString('es-CO')} COP
               <div style="font-size:10px; font-weight:700; color:#065f46;">(≈ $${totalVentaFacturadaUSD.toFixed(2)} USD)</div>
@@ -1438,7 +1479,7 @@ export class ReportService {
         </table>
         <div class="total-box" style="background:#fffbeb; border-color:#fde68a;">
           <div class="total-label" style="color:#92400e;">TOTAL CUENTAS A CRÉDITO POR COBRAR (PESOS):</div>
-          <div class="total-val" style="color:#b45309;">${Math.round(totalCreditUSD * copRateGlobal).toLocaleString('es-CO')} COP</div>
+          <div class="total-val" style="color:#b45309;">${Math.round(totalCreditCOP).toLocaleString('es-CO')} COP</div>
           <div style="font-size:10px; font-weight:700; color:#92400e;">(≈ $${totalCreditUSD.toFixed(2)} USD)</div>
         </div>
       ` : `

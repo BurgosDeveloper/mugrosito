@@ -495,9 +495,12 @@ function itemDetails(item, order = {}) {
 }
 
 function reportPaymentCurrency(method) {
-  if (['Efectivo COP', 'Bancolombia', 'Nequi', 'Binance COP'].includes(method)) return 'COP';
-  if (['Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito'].includes(method)) return 'Bs';
-  return 'USD';
+  if (!method) return 'COP';
+  const m = String(method).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (m.includes('cop') || m.includes('bancolombia') || m.includes('nequi') || m.includes('credito')) return 'COP';
+  if (m.includes('bs') || m.includes('movil') || m.includes('debito') || m.includes('tarjeta')) return 'Bs';
+  if (m.includes('zelle') || m.includes('binance') || m.includes('usd') || m.includes('dolar')) return 'USD';
+  return 'COP';
 }
 
 function reportAmounts(payment) {
@@ -1920,6 +1923,7 @@ function buildCrispysCierreTicket(data) {
     'Pago Móvil',
     'Tarjeta de Débito',
     'Tarjeta de Crédito',
+    'Crédito',
   ];
 
   const methodTotals = new Map(
@@ -2138,6 +2142,9 @@ function buildCrispysCierreTicket(data) {
       } else if (['TARJETA DE CREDITO', 'TARJETA DE CRÉDITO'].includes(label)) {
         label = 'PTO VENTA (CRE)';
         montoStr = `${totals.netNative.toFixed(2)}BS`;
+      } else if (label.includes('CREDITO') || label.includes('CRÉDITO')) {
+        label = 'CREDITO';
+        montoStr = `${Math.round(totals.netNative).toLocaleString('en-US')}COP`;
       } else {
         if (totals.currency === 'COP') montoStr = `${Math.round(totals.netNative).toLocaleString('en-US')}COP`;
         else if (totals.currency === 'Bs') montoStr = `${totals.netNative.toFixed(2)}BS`;
@@ -2227,7 +2234,7 @@ function buildCrispysCierreTicket(data) {
   lines.push(formatTwoColumns('DEUDOR', 'MONTO'));
   const creditOrders = (Array.isArray(data.creditOrders) && data.creditOrders.length > 0)
     ? data.creditOrders
-    : (data.orders || []).filter((o) => o.paymentStatus === 'credito');
+    : (data.orders || []).filter((o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || o.type === 'credito');
   if (creditOrders.length === 0) {
     if (Number(data.creditsUSD) > 0) {
       const crCOP = Math.round(Number(data.creditsUSD) * copRateGlobal);

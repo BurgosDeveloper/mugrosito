@@ -57,31 +57,42 @@ module.exports = function (io) {
         return res.status(400).json({ error: 'Fecha inicio debe ser menor o igual a fecha fin.' });
       }
 
-      // Normalizar límites de fecha para coincidir exactamente con los timestamps de PostgreSQL en hora local
-      let fromClean = String(from || '').trim().replace('T', ' ');
-      let toClean = String(to || '').trim().replace('T', ' ');
-
-      if (/^\d{4}-\d{2}-\d{2}$/.test(fromClean)) {
-        fromClean += ' 00:00:00';
-      } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(fromClean)) {
-        fromClean += ':00';
+      function toLocalSqlTimestamp(val, isEnd = false) {
+        const s = String(val || '').trim();
+        if (s.endsWith('Z') || /[+-]\d{2}(:\d{2})?$/.test(s)) {
+          const d = new Date(s);
+          if (!isNaN(d.getTime())) {
+            const yr = d.getFullYear();
+            const mo = String(d.getMonth() + 1).padStart(2, '0');
+            const dy = String(d.getDate()).padStart(2, '0');
+            const hr = String(d.getHours()).padStart(2, '0');
+            const mn = String(d.getMinutes()).padStart(2, '0');
+            const sc = String(d.getSeconds()).padStart(2, '0');
+            const ms = String(d.getMilliseconds()).padStart(3, '0');
+            return `${yr}-${mo}-${dy} ${hr}:${mn}:${sc}.${ms}`;
+          }
+        }
+        let clean = s.replace('T', ' ');
+        if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+          clean += isEnd ? ' 23:59:59.999' : ' 00:00:00.000';
+        } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(clean)) {
+          clean += isEnd ? ':59.999' : ':00.000';
+        } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(clean)) {
+          clean += isEnd ? '.999' : '.000';
+        }
+        return clean;
       }
 
-      if (/^\d{4}-\d{2}-\d{2}$/.test(toClean)) {
-        toClean += ' 23:59:59.999';
-      } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(toClean)) {
-        toClean += ':59.999';
-      } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(toClean)) {
-        toClean += '.999';
-      }
+      const fromClean = toLocalSqlTimestamp(from, false);
+      const toClean = toLocalSqlTimestamp(to, true);
 
       const shiftScope = req.user.shift === 'ambos' ? '' : ' AND orders.shift = $3';
       const shiftParams = req.user.shift === 'ambos' ? [fromClean, toClean] : [fromClean, toClean, req.user.shift];
 
-      // 1. Órdenes pagadas o a crédito en el rango.
+      // 1. Órdenes pagadas o a crédito en el rango (contabiliza 100% dinero e ítems de todo el sistema).
       const { rows: orderRows } = await query(
         `SELECT * FROM orders
-         WHERE payment_status IN ('pagado', 'credito')
+         WHERE (payment_status IN ('pagado', 'credito') OR payment_method = 'Crédito' OR type = 'credito')
            AND status != 'cancelado'
            AND (
              EXISTS (
@@ -90,6 +101,7 @@ module.exports = function (io) {
                  AND op.created_at >= $1 AND op.created_at <= $2
              )
              OR (orders.created_at >= $1 AND orders.created_at <= $2)
+             OR (orders.updated_at >= $1 AND orders.updated_at <= $2)
            )
            ${shiftScope}
          ORDER BY created_at ASC`,
@@ -138,6 +150,36 @@ module.exports = function (io) {
           shiftParams
         );
         paymentRows = rows;
+      }
+
+      // Garantizar que toda orden facturada o a crédito en el intervalo tenga su pago computado
+      for (const ord of orderRows) {
+        const hasPayment = paymentRows.some((p) => p.order_id === ord.id);
+        if (!hasPayment) {
+          const isCredit = ord.payment_status === 'credito' || ord.payment_method === 'Crédito' || ord.type === 'credito';
+          const method = isCredit ? 'Crédito' : (ord.payment_method || 'Efectivo COP');
+          const totalUSD = parseFloat(ord.total_usd) || 0;
+          const ordCopRate = parseFloat(ord.cop_rate_at_payment) || copRate;
+          const totalCOP = parseFloat(ord.total_cop) || Math.round(totalUSD * ordCopRate);
+          paymentRows.push({
+            id: `pm-synth-${ord.id}`,
+            order_id: ord.id,
+            order_number: ord.order_number,
+            payer_name: ord.customer_name || 'Cliente General',
+            payment_method: method,
+            amount_paid_usd: totalUSD,
+            cash_tendered_usd: method === 'Efectivo USD' ? totalUSD : 0,
+            cash_tendered_cop: (method === 'Crédito' || method.includes('COP') || method.includes('Bancolombia') || method.includes('Nequi')) ? totalCOP : 0,
+            cash_tendered_bs: (method.includes('Bs') || method.includes('Móvil') || method.includes('Débito') || method.includes('Tarjeta')) ? (ordCopRate > 0 && bsRate > 0 ? (totalCOP / bsRate) : 0) : 0,
+            change_given_usd: 0,
+            change_given_cop: 0,
+            change_given_bs: 0,
+            item_ids: [],
+            cop_rate: ordCopRate,
+            bs_rate: parseFloat(ord.bs_rate_at_payment) || bsRate,
+            created_at: ord.updated_at || ord.created_at,
+          });
+        }
       }
 
       // 4. Transacciones de caja en el rango
@@ -301,23 +343,33 @@ module.exports = function (io) {
         };
       });
 
-      const payments = paymentRows.map((pm) => ({
-        id: pm.id,
-        orderId: pm.order_id,
-        orderNumber: String(pm.order_number || '').replace(/^#+/, ''),
-        payerName: pm.payer_name || 'Cliente General',
-        paymentMethod: pm.payment_method,
-        amountPaidUSD: parseFloat(pm.amount_paid_usd) || 0,
-        cashTenderedUSD: parseFloat(pm.cash_tendered_usd) || 0,
-        cashTenderedCOP: parseFloat(pm.cash_tendered_cop) || 0,
-        cashTenderedBs: parseFloat(pm.cash_tendered_bs) || 0,
-        changeGivenUSD: parseFloat(pm.change_given_usd) || 0,
-        changeGivenCOP: parseFloat(pm.change_given_cop) || 0,
-        changeGivenBs: parseFloat(pm.change_given_bs) || 0,
-        copRate: parseFloat(pm.cop_rate) || copRate,
-        bsRate: parseFloat(pm.bs_rate) || bsRate,
-        createdAt: pm.created_at,
-      }));
+      const payments = paymentRows.map((pm) => {
+        const pMethod = pm.payment_method || 'Efectivo USD';
+        const pRate = parseFloat(pm.cop_rate) || copRate;
+        const bRate = parseFloat(pm.bs_rate) || bsRate;
+        const pUSD = parseFloat(pm.amount_paid_usd) || 0;
+        let tenderCOP = parseFloat(pm.cash_tendered_cop) || 0;
+        if (tenderCOP === 0 && (pMethod === 'Crédito' || pMethod.includes('COP') || pMethod.includes('Bancolombia') || pMethod.includes('Nequi'))) {
+          tenderCOP = Math.round(pUSD * pRate);
+        }
+        return {
+          id: pm.id,
+          orderId: pm.order_id,
+          orderNumber: String(pm.order_number || '').replace(/^#+/, ''),
+          payerName: pm.payer_name || 'Cliente General',
+          paymentMethod: pMethod,
+          amountPaidUSD: pUSD,
+          cashTenderedUSD: parseFloat(pm.cash_tendered_usd) || 0,
+          cashTenderedCOP: tenderCOP,
+          cashTenderedBs: parseFloat(pm.cash_tendered_bs) || 0,
+          changeGivenUSD: parseFloat(pm.change_given_usd) || 0,
+          changeGivenCOP: parseFloat(pm.change_given_cop) || 0,
+          changeGivenBs: parseFloat(pm.change_given_bs) || 0,
+          copRate: pRate,
+          bsRate: bRate,
+          createdAt: pm.created_at,
+        };
+      });
 
       const transactions = txRows.map((t) => ({
         id: t.id,

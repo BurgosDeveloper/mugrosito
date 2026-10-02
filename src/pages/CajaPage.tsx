@@ -204,11 +204,14 @@ export const CajaPage: React.FC = () => {
   const [isLoadingReporte, setIsLoadingReporte] = useState<boolean>(false);
   const [reporteError, setReporteError] = useState<string>('');
 
+  const isOrderCredit = (o: Order) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || (o as any).type === 'credito';
+  const isOrderPaidOrCredit = (o: Order) => o.paymentStatus === 'pagado' || isOrderCredit(o);
+
   // Comandas activas no finalizadas/pagadas totalmente (excluye canceladas, fusionadas, pagadas y créditos ya entregados)
   const activeComandas = orders.filter(
-    (o) => o.status !== 'cancelado' && o.status !== 'fusionada' && !(o.status === 'entregada' && (o.paymentStatus === 'pagado' || o.paymentStatus === 'credito')) && (!o.shift || o.shift === 'ambos' || o.shift === userSession?.shift)
+    (o) => o.status !== 'cancelado' && o.status !== 'fusionada' && !(o.status === 'entregada' && isOrderPaidOrCredit(o)) && (!o.shift || o.shift === 'ambos' || o.shift === userSession?.shift)
   );
-  const paidOrdersToday = orders.filter((o) => (o.paymentStatus === 'pagado' || o.paymentStatus === 'credito') && (!o.shift || o.shift === 'ambos' || o.shift === userSession?.shift));
+  const paidOrdersToday = orders.filter((o) => isOrderPaidOrCredit(o) && (!o.shift || o.shift === 'ambos' || o.shift === userSession?.shift));
 
   // Historico Filters
   const [historicoSearch, setHistoricoSearch] = useState<string>('');
@@ -2238,18 +2241,34 @@ export const CajaPage: React.FC = () => {
 
               {/* Tarjetas informativas de recaudación y ventas */}
               {(() => {
+                const contOrders = paidOrdersToday.filter((o) => !isOrderCredit(o));
+                const credOrders = paidOrdersToday.filter(isOrderCredit);
+
                 const totalVentaCOP = paidOrdersToday.reduce(
                   (sum, o) => sum + ((o as any).totalCOP || roundCOP((o.totalUSD || 0) * (o.copRateAtPayment || exchangeRates.COP || 3100))),
                   0
                 );
                 const totalVentaUSD = paidOrdersToday.reduce((sum, o) => sum + (o.totalUSD || 0), 0);
+
+                const totalCredCOP = credOrders.reduce(
+                  (sum, o) => sum + ((o as any).totalCOP || roundCOP((o.totalUSD || 0) * (o.copRateAtPayment || exchangeRates.COP || 3100))),
+                  0
+                );
+
                 return (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
                       <span className="text-[10px] font-black uppercase text-gray-500 block">Venta Facturada Turno</span>
                       <span className="text-base font-black text-black block">{Math.round(totalVentaCOP).toLocaleString('es-CO')} COP</span>
                       <span className="text-[11px] font-bold text-gray-600 block">≈ ${totalVentaUSD.toFixed(2)} USD</span>
-                      <span className="text-[10px] text-gray-500 font-bold block mt-0.5">{paidOrdersToday.length} comanda(s) cobrada(s)</span>
+                      <div className="text-[10px] text-gray-500 font-bold block mt-0.5">
+                        <span>{paidOrdersToday.length} comanda(s) cobrada(s)</span>
+                        {credOrders.length > 0 && (
+                          <span className="text-amber-800 font-semibold block text-[9.5px]">
+                            ({contOrders.length} contado + {credOrders.length} crédito: {Math.round(totalCredCOP).toLocaleString('es-CO')} COP)
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
                       <span className="text-[10px] font-black uppercase text-gray-500 block">Efectivo Físico en Gaveta</span>

@@ -94,8 +94,9 @@ function formatDate(dateStr: string): string {
 }
 
 function paymentCurrency(method: string): 'USD' | 'COP' | 'Bs' {
-  if (['Efectivo COP', 'Bancolombia', 'Nequi', 'Binance COP'].includes(method)) return 'COP';
-  if (['Pago Móvil', 'Tarjeta de Débito', 'Tarjeta de Crédito'].includes(method)) return 'Bs';
+  const norm = (method || '').toLowerCase().trim();
+  if (['efectivo cop', 'bancolombia', 'nequi', 'binance cop', 'crédito', 'credito'].includes(norm)) return 'COP';
+  if (['pago móvil', 'pago movil', 'tarjeta de débito', 'tarjeta de debito', 'tarjeta de crédito', 'tarjeta de credito'].includes(norm)) return 'Bs';
   return 'USD';
 }
 
@@ -176,9 +177,10 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     }
   });
 
-  const cashOrders = data.orders.filter((o) => o.paymentStatus === 'pagado' && o.paymentMethod !== 'Crédito');
-  const creditOrders = data.orders.filter((o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito');
-  const billedOrders = data.orders.filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
+  const isCreditOrder = (o: any) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || o.type === 'credito';
+  const cashOrders = data.orders.filter((o) => o.paymentStatus === 'pagado' && !isCreditOrder(o));
+  const creditOrders = data.orders.filter((o) => isCreditOrder(o));
+  const billedOrders = data.orders.filter((o) => o.paymentStatus === 'pagado' || isCreditOrder(o));
   const billedOrderIds = new Set(billedOrders.map((o) => o.id));
   const cashItems = data.items.filter((it) => billedOrderIds.has(it.orderId));
 
@@ -485,7 +487,7 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   itemsRows.push(['TOTAL GENERAL FACTURADO EN ÍTEMS', '', `${Math.round(totalItemsCOP).toLocaleString('es-CO')} COP`, `$${totalItemsUSD.toFixed(2)} USD`]);
 
   const itemsData = [
-    ['ÍTEMS FACTURADOS EN EL INTERVALO (CONTADO)'],
+    ['ÍTEMS FACTURADOS EN EL INTERVALO (CONTADO Y CRÉDITO)'],
     ['Desde:', formatDate(data.dateRange.from), 'Hasta:', formatDate(data.dateRange.to)],
     [],
     itemsHeader,
@@ -523,7 +525,7 @@ export function exportToExcel(data: ReporteIntervaloData): void {
   XLSX.utils.book_append_sheet(wb, ws4, 'Historial Pagos');
 
   // --- Hoja 5: Cuentas a Crédito / Deudas ---
-  const creditOrdersList = data.orders.filter((o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito');
+  const creditOrdersList = data.orders.filter((o) => isCreditOrder(o));
   const creditRows = creditOrdersList.map((ord) => {
     const orderItems = data.items
       .filter((it) => it.orderId === ord.id)
@@ -531,16 +533,17 @@ export function exportToExcel(data: ReporteIntervaloData): void {
       .join(', ');
     const cRate = ord.copRateAtPayment || data.exchangeRates.COP || 3100;
     const bRate = ord.bsRateAtPayment || data.exchangeRates.Bs || 3.2;
-    const ordCop = (ord as any).totalCOP || (ord.totalUSD * cRate);
+    const ordCop = (ord as any).totalCOP || roundCOP((ord.totalUSD || 0) * cRate);
+    const ordUsd = cRate > 0 ? (ordCop / cRate) : (ord.totalUSD || 0);
     const ordBs = bRate > 0 ? (ordCop / bRate) : 0;
     return [
       formatDate(ord.createdAt),
       `#${ord.orderNumber}`,
       ord.customerName || 'Cliente Deudor',
       orderItems || 'Consumo general',
-      ord.totalUSD.toFixed(2),
-      roundCOP(ordCop).toLocaleString(),
-      ordBs.toFixed(2),
+      `${roundCOP(ordCop).toLocaleString('es-CO')} COP`,
+      `$${ordUsd.toFixed(2)} USD`,
+      `Bs ${ordBs.toFixed(2)}`,
     ];
   });
 
@@ -548,11 +551,11 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     ['MUGROSITO - DESGLOSE DE CRÉDITOS Y CUENTAS POR COBRAR'],
     ['Desde:', formatDate(data.dateRange.from), 'Hasta:', formatDate(data.dateRange.to)],
     [],
-    ['Fecha / Hora', 'Comanda #', 'Cliente / Deudor', 'Ítems Solicitados', 'Deuda USD', 'Equivalente COP', 'Equivalente Bs'],
+    ['Fecha / Hora', 'Comanda #', 'Cliente / Deudor', 'Ítems Solicitados', 'Deuda COP', 'Equivalente USD', 'Equivalente Bs'],
     ...creditRows,
   ];
   const ws5 = XLSX.utils.aoa_to_sheet(creditData);
-  ws5['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 25 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 16 }];
+  ws5['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 25 }, { wch: 40 }, { wch: 18 }, { wch: 16 }, { wch: 16 }];
   XLSX.utils.book_append_sheet(wb, ws5, 'Créditos');
 
   // Generar y descargar

@@ -161,7 +161,7 @@ module.exports = function(io) {
                   ELSE op.amount_paid_usd 
                 END) as total_usd,
                 SUM(CASE 
-                  WHEN op.payment_method IN ('Efectivo COP', 'Bancolombia', 'Nequi', 'Binance COP') 
+                  WHEN op.payment_method IN ('Efectivo COP', 'Bancolombia', 'Nequi', 'Binance COP', 'Crédito') 
                   THEN COALESCE(NULLIF(op.cash_tendered_cop, 0), op.amount_paid_usd * op.cop_rate) - COALESCE(op.change_given_cop, 0)
                   ELSE 0 
                 END) as total_cop,
@@ -173,27 +173,27 @@ module.exports = function(io) {
                 COUNT(op.id) as count
          FROM order_payments op
          INNER JOIN orders o ON o.id = op.order_id
-         WHERE o.archived_at IS NULL
+         WHERE o.archived_at IS NULL AND o.status != 'cancelado'
          GROUP BY op.payment_method
          ORDER BY total_usd DESC`
       );
 
       // 2. Obtener resumen de créditos y órdenes procesadas del turno activo
       const { rows: creditSummaryRows } = await query(
-        `SELECT COUNT(id) as count, COALESCE(SUM(total_usd), 0) as total_usd
+        `SELECT COUNT(id) as count, COALESCE(SUM(total_usd), 0) as total_usd, COALESCE(SUM(total_cop), 0) as total_cop
          FROM orders
-         WHERE payment_status = 'credito' AND archived_at IS NULL`
+         WHERE (payment_status = 'credito' OR payment_method = 'Crédito' OR type = 'credito') AND archived_at IS NULL AND status != 'cancelado'`
       );
 
       const { rows: shiftOrdersRows } = await query(
-        `SELECT id, order_number, type, customer_name, total_usd, delivery_fee_usd, payment_status, status, table_number, created_at
+        `SELECT id, order_number, type, customer_name, total_usd, total_cop, delivery_fee_usd, delivery_fee_cop, cop_rate_at_payment, bs_rate_at_payment, payment_method, payment_status, status, table_number, created_at, updated_at
          FROM orders
          WHERE archived_at IS NULL
          ORDER BY created_at ASC`
       );
 
       const totalSalesUSD = shiftOrdersRows
-        .filter((o) => o.payment_status === 'pagado' || o.payment_status === 'credito')
+        .filter((o) => o.status !== 'cancelado' && (o.payment_status === 'pagado' || o.payment_status === 'credito' || o.payment_method === 'Crédito' || o.type === 'credito'))
         .reduce((sum, o) => sum + (parseFloat(o.total_usd) || 0), 0);
 
       const cierreId = `cierre-${Date.now()}`;
@@ -220,17 +220,24 @@ module.exports = function(io) {
 
       // 4. Impresión Térmica Automática del Cierre y Arqueo (Enriquecido con data completa del turno)
       try {
-        const allShiftOrderIds = shiftOrdersRows.map((o) => o.id);
+        const { rows: rateRows } = await query(`SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = 'ambos'`);
+        const currentRates = {
+          COP: Number(rateRows[0]?.cop_rate) || 3100,
+          Bs: Number(rateRows[0]?.bs_rate) || 3.2,
+        };
+
+        const billedShiftOrders = shiftOrdersRows.filter((o) => o.status !== 'cancelado' && (o.payment_status === 'pagado' || o.payment_status === 'credito' || o.payment_method === 'Crédito' || o.type === 'credito'));
+        const billedShiftOrderIds = billedShiftOrders.map((o) => o.id);
 
         let shiftItems = [];
-        if (allShiftOrderIds.length > 0) {
+        if (billedShiftOrderIds.length > 0) {
           const { rows: itemsRows } = await query(
-            `SELECT oi.*, o.order_number, COALESCE(NULLIF(oi.category, ''), p.category, 'Sin categoría') AS category
+            `SELECT oi.*, o.order_number, o.total_usd, o.total_cop, o.cop_rate_at_payment, o.bs_rate_at_payment, COALESCE(NULLIF(oi.category, ''), p.category, 'Sin categoría') AS category
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN products p ON (p.id = oi.product_id OR LOWER(p.name) = LOWER(oi.product_name))
              WHERE oi.order_id = ANY($1::text[])`,
-            [allShiftOrderIds]
+            [billedShiftOrderIds]
           );
           shiftItems = itemsRows.map((it) => {
             let extras = [];
@@ -239,12 +246,19 @@ module.exports = function(io) {
                 extras = typeof it.extras_json === 'string' ? JSON.parse(it.extras_json) : it.extras_json;
               }
             } catch (e) {}
+            const ordCopRate = parseFloat(it.cop_rate_at_payment) || currentRates.COP;
+            const rawPrice = parseFloat(it.price) || 0;
+            const priceCOP = rawPrice >= 100 ? rawPrice : Math.round(rawPrice * ordCopRate);
+            const priceUSD = rawPrice >= 100 ? (ordCopRate > 0 ? Number((rawPrice / ordCopRate).toFixed(4)) : rawPrice) : rawPrice;
             return {
               id: it.id,
               orderId: it.order_id,
               orderNumber: String(it.order_number || '').replace(/^#+/, ''),
               productName: it.product_name,
-              price: parseFloat(it.price) || 0,
+              price: rawPrice,
+              priceUSD,
+              priceCOP,
+              copRate: ordCopRate,
               quantity: it.quantity || 1,
               category: it.category || 'Sin categoría',
               drinkType: it.drink_type,
@@ -254,6 +268,7 @@ module.exports = function(io) {
           });
         }
 
+        const allShiftOrderIds = shiftOrdersRows.map((o) => o.id);
         let shiftPayments = [];
         if (allShiftOrderIds.length > 0) {
           const { rows: payRows } = await query(
@@ -264,43 +279,84 @@ module.exports = function(io) {
              ORDER BY op.created_at ASC`,
             [allShiftOrderIds]
           );
-          shiftPayments = payRows.map((pm) => ({
-            id: pm.id,
-            orderId: pm.order_id,
-            orderNumber: String(pm.order_number || '').replace(/^#+/, ''),
-            payerName: pm.payer_name || 'Cliente General',
-            paymentMethod: pm.payment_method,
-            amountPaidUSD: parseFloat(pm.amount_paid_usd) || 0,
-            cashTenderedUSD: parseFloat(pm.cash_tendered_usd) || 0,
-            cashTenderedCOP: parseFloat(pm.cash_tendered_cop) || 0,
-            cashTenderedBs: parseFloat(pm.cash_tendered_bs) || 0,
-            changeGivenUSD: parseFloat(pm.change_given_usd) || 0,
-            changeGivenCOP: parseFloat(pm.change_given_cop) || 0,
-            changeGivenBs: parseFloat(pm.change_given_bs) || 0,
-            copRate: parseFloat(pm.cop_rate) || 3100,
-            bsRate: parseFloat(pm.bs_rate) || 3.2,
-            createdAt: pm.created_at,
-          }));
+          shiftPayments = payRows.map((pm) => {
+            const pMethod = pm.payment_method || 'Efectivo USD';
+            const pRate = parseFloat(pm.cop_rate) || currentRates.COP;
+            const pUSD = parseFloat(pm.amount_paid_usd) || 0;
+            let tenderCOP = parseFloat(pm.cash_tendered_cop) || 0;
+            if (tenderCOP === 0 && (pMethod === 'Crédito' || pMethod.includes('COP') || pMethod.includes('Bancolombia') || pMethod.includes('Nequi'))) {
+              tenderCOP = Math.round(pUSD * pRate);
+            }
+            return {
+              id: pm.id,
+              orderId: pm.order_id,
+              orderNumber: String(pm.order_number || '').replace(/^#+/, ''),
+              payerName: pm.payer_name || 'Cliente General',
+              paymentMethod: pMethod,
+              amountPaidUSD: pUSD,
+              cashTenderedUSD: parseFloat(pm.cash_tendered_usd) || 0,
+              cashTenderedCOP: tenderCOP,
+              cashTenderedBs: parseFloat(pm.cash_tendered_bs) || 0,
+              changeGivenUSD: parseFloat(pm.change_given_usd) || 0,
+              changeGivenCOP: parseFloat(pm.change_given_cop) || 0,
+              changeGivenBs: parseFloat(pm.change_given_bs) || 0,
+              copRate: pRate,
+              bsRate: parseFloat(pm.bs_rate) || currentRates.Bs,
+              createdAt: pm.created_at,
+            };
+          });
+
+          // Garantizar que órdenes facturadas/crédito sin filas en order_payments estén incluidas
+          for (const ord of billedShiftOrders) {
+            if (!shiftPayments.some((p) => p.orderId === ord.id)) {
+              const isCredit = ord.payment_status === 'credito' || ord.payment_method === 'Crédito' || ord.type === 'credito';
+              const method = isCredit ? 'Crédito' : (ord.payment_method || 'Efectivo COP');
+              const oUSD = parseFloat(ord.total_usd) || 0;
+              const oRate = parseFloat(ord.cop_rate_at_payment) || currentRates.COP;
+              const oCOP = parseFloat(ord.total_cop) || Math.round(oUSD * oRate);
+              shiftPayments.push({
+                id: `pm-synth-cierre-${ord.id}`,
+                orderId: ord.id,
+                orderNumber: String(ord.order_number || '').replace(/^#+/, ''),
+                payerName: ord.customer_name || 'Cliente General',
+                paymentMethod: method,
+                amountPaidUSD: oUSD,
+                cashTenderedUSD: method === 'Efectivo USD' ? oUSD : 0,
+                cashTenderedCOP: (method === 'Crédito' || method.includes('COP') || method.includes('Bancolombia') || method.includes('Nequi')) ? oCOP : 0,
+                cashTenderedBs: (method.includes('Bs') || method.includes('Móvil') || method.includes('Débito') || method.includes('Tarjeta')) ? (currentRates.Bs > 0 ? oCOP / currentRates.Bs : 0) : 0,
+                changeGivenUSD: 0,
+                changeGivenCOP: 0,
+                changeGivenBs: 0,
+                copRate: oRate,
+                bsRate: parseFloat(ord.bs_rate_at_payment) || currentRates.Bs,
+                createdAt: ord.created_at,
+              });
+            }
+          }
         }
 
-        const mappedOrders = shiftOrdersRows.map((ord) => ({
-          id: ord.id,
-          orderNumber: String(ord.order_number || '').replace(/^#+/, ''),
-          type: ord.type,
-          customerName: ord.customer_name,
-          paymentStatus: ord.payment_status,
-          status: ord.status,
-          tableNumber: ord.table_number,
-          totalUSD: parseFloat(ord.total_usd) || 0,
-          deliveryFeeUSD: parseFloat(ord.delivery_fee_usd) || 0,
-          createdAt: ord.created_at,
-        }));
-
-        const { rows: rateRows } = await query(`SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = 'ambos'`);
-        const currentRates = {
-          COP: Number(rateRows[0]?.cop_rate) || 3100,
-          Bs: Number(rateRows[0]?.bs_rate) || 3.2,
-        };
+        const mappedOrders = shiftOrdersRows.map((ord) => {
+          const ordUSD = parseFloat(ord.total_usd) || 0;
+          const ordRate = parseFloat(ord.cop_rate_at_payment) || currentRates.COP;
+          const ordCOP = parseFloat(ord.total_cop) || Math.round(ordUSD * ordRate);
+          return {
+            id: ord.id,
+            orderNumber: String(ord.order_number || '').replace(/^#+/, ''),
+            type: ord.type,
+            customerName: ord.customer_name,
+            paymentStatus: ord.payment_status,
+            paymentMethod: ord.payment_method,
+            status: ord.status,
+            tableNumber: ord.table_number,
+            totalUSD: ordUSD,
+            totalCOP: ordCOP,
+            copRateAtPayment: ordRate,
+            bsRateAtPayment: parseFloat(ord.bs_rate_at_payment) || currentRates.Bs,
+            deliveryFeeUSD: parseFloat(ord.delivery_fee_usd) || 0,
+            deliveryFeeCOP: parseFloat(ord.delivery_fee_cop) || 0,
+            createdAt: ord.created_at,
+          };
+        });
 
         await printCierreShiftTicket({
           shift: 'ambos',
