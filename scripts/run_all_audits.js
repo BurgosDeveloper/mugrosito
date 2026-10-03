@@ -20,7 +20,8 @@ const suites = [
   { file: 'test_comprehensive_credit_and_money_audit.js', name: 'Auditoría 100% Crédito, Dinero e Ítems en Cierre' },
   { file: 'test_reopen_and_deliver_flow.js', name: 'Reapertura, Entrega y Liberación Inmediata de Mesas' },
   { file: 'test_guia_md_scenarios.js', name: 'Escenarios Operativos Obligatorios de GUIA.md' },
-  { file: 'test_thermal_printing_simulation.js', name: 'Impresión Térmica ESC/POS y Conectividad LAN' }
+  { file: 'test_thermal_printing_simulation.js', name: 'Impresión Térmica ESC/POS y Conectividad LAN' },
+  { file: 'test_historical_reports_audit.js', name: 'Auditoría de Reportes Históricos y Días Anteriores' }
 ];
 
 function checkServer() {
@@ -60,16 +61,32 @@ async function ensureServerRunning() {
   return serverProc;
 }
 
+const { initDb, query } = require('../server/db');
+
+async function cleanStaleTestArtifacts() {
+  try {
+    await initDb();
+    await query("DELETE FROM order_payments WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'");
+    await query("DELETE FROM order_items WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'");
+    await query("DELETE FROM caja_chica_transactions WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'");
+    await query("DELETE FROM orders WHERE id LIKE 'audit-%' OR id LIKE 'test-%'");
+  } catch (_) {}
+}
+
 async function main() {
   console.log('======================================================================');
   console.log(`   🚀 EJECUTANDO AUDITORÍA GLOBAL DE PUNTA A PUNTA (${suites.length} SUITES)`);
   console.log('======================================================================\n');
+
+  await cleanStaleTestArtifacts();
 
   const spawnedServer = await ensureServerRunning();
 
   let totalSuitesPassed = 0;
   let totalSuitesFailed = 0;
   const results = [];
+
+  try {
 
   for (const suite of suites) {
     process.stdout.write(`⏳ Ejecutando ${suite.name} (${suite.file})... `);
@@ -103,11 +120,13 @@ async function main() {
       results.push({ name: suite.name, file: suite.file, passed: 0, failed: 1, status: 'ERROR' });
     }
   }
-
-  if (spawnedServer) {
-    try {
-      spawnedServer.kill();
-    } catch (_) {}
+  } finally {
+    if (spawnedServer) {
+      try {
+        spawnedServer.kill();
+      } catch (_) {}
+    }
+    await cleanStaleTestArtifacts();
   }
 
   console.log('\n======================================================================');

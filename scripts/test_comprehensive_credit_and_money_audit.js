@@ -55,14 +55,20 @@ async function runAudit() {
   const testRunId = Date.now();
   const startTime = new Date(Date.now() - 60000).toISOString();
 
-  // Create 3 orders:
-  // Order 1: Contado Efectivo COP (30.000 COP) - 2 Hot Dogs
-  const ord1Id = `audit-c-cop-${testRunId}`;
-  await query(
-    `INSERT INTO orders (id, order_number, type, table_number, status, payment_status, payment_method, total_usd, total_cop, shift, cop_rate_at_payment, bs_rate_at_payment, created_at, updated_at)
-     VALUES ($1, '901', 'mesa', 1, 'entregada', 'pagado', 'Efectivo COP', 9.68, 30000, 'ambos', $2, $3, NOW(), NOW())`,
-    [ord1Id, copRate, bsRate]
-  );
+  // Pre-cleanup of any stale audit orders
+  await query(`DELETE FROM order_payments WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+  await query(`DELETE FROM order_items WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+  await query(`DELETE FROM orders WHERE id LIKE 'audit-%' OR id LIKE 'test-%'`);
+
+  try {
+    // Create 3 orders:
+    // Order 1: Contado Efectivo COP (30.000 COP) - 2 Hot Dogs
+    const ord1Id = `audit-c-cop-${testRunId}`;
+    await query(
+      `INSERT INTO orders (id, order_number, type, table_number, status, payment_status, payment_method, total_usd, total_cop, shift, cop_rate_at_payment, bs_rate_at_payment, created_at, updated_at)
+       VALUES ($1, '901', 'mesa', 1, 'entregada', 'pagado', 'Efectivo COP', 9.68, 30000, 'ambos', $2, $3, NOW(), NOW())`,
+      [ord1Id, copRate, bsRate]
+    );
   await query(
     `INSERT INTO order_items (id, order_id, product_id, product_name, price, quantity, category)
      VALUES 
@@ -206,10 +212,12 @@ async function runAudit() {
   console.log(`  Total facturado esperado: ${totalFacturadoCOP.toLocaleString('es-CO')} COP`);
   assert(ticketString.includes('120.000') || ticketString.includes('120,000') || ticketString.includes('120000'), 'Total Facturado en ticket refleja 120.000 COP (100% de ventas contado + crédito)');
 
-  // Cleanup test orders
-  await query(`DELETE FROM order_payments WHERE order_id IN ($1, $2, $3)`, [ord1Id, ord2Id, ord3Id]);
-  await query(`DELETE FROM order_items WHERE order_id IN ($1, $2, $3)`, [ord1Id, ord2Id, ord3Id]);
-  await query(`DELETE FROM orders WHERE id IN ($1, $2, $3)`, [ord1Id, ord2Id, ord3Id]);
+  } finally {
+    // Cleanup test orders reliably
+    await query(`DELETE FROM order_payments WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+    await query(`DELETE FROM order_items WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+    await query(`DELETE FROM orders WHERE id LIKE 'audit-%' OR id LIKE 'test-%'`);
+  }
 
   console.log('\n======================================================================');
   console.log(`   RESULTADOS: ${passed} PASSED | ${failed} FAILED`);

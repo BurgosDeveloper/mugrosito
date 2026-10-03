@@ -850,11 +850,12 @@ function buildReportTicket(reportType, data) {
       lines.push(`  TOTAL: $${(Number(order.totalUSD) || 0).toFixed(2)} USD`);
     }
     addSection(lines, 'RESUMEN DE COCINA');
-    lines.push(`COMANDAS: ${(data.orders || []).length}`, `ITEMS FACTURADOS: ${(data.items || []).reduce((total, item) => total + (Number(item.quantity) || 0), 0)}`);
   } else {
     // REPORTE CONTABLE CONSOLIDADO
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const repCopRate = (data.orders || []).find((o) => Number(o.copRateAtPayment || o.cop_rate_at_payment) > 0)?.copRateAtPayment;
+    const repBsRate = (data.orders || []).find((o) => Number(o.bsRateAtPayment || o.bs_rate_at_payment) > 0)?.bsRateAtPayment;
+    const copRateGlobal = Number(repCopRate) || Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(repBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
 
     const billedTotals = { usd: 0, cop: 0, bs: 0 };
     const byMethod = new Map();
@@ -961,11 +962,13 @@ function buildReportTicket(reportType, data) {
     const billedOrderIds = new Set(billedOrders.map((o) => o.id));
     const cashItems = (data.items || []).filter((item) => billedOrderIds.has(item.orderId || item.order_id));
 
-    const firstOrder = data.orders?.[0]?.orderNumber || data.orders?.[0]?.order_number || 'N/A';
-    const lastOrder = data.orders?.[data.orders.length - 1]?.orderNumber || data.orders?.[data.orders.length - 1]?.order_number || 'N/A';
+    const rawFirst = data.orders?.[0]?.orderNumber || data.orders?.[0]?.order_number || '';
+    const rawLast = data.orders?.[data.orders.length - 1]?.orderNumber || data.orders?.[data.orders.length - 1]?.order_number || '';
+    const firstOrder = rawFirst ? String(rawFirst).replace(/^#+/, '') : 'N/A';
+    const lastOrder = rawLast ? String(rawLast).replace(/^#+/, '') : 'N/A';
 
-    lines.push(...wrapText(`COMANDA INICIAL: #${firstOrder}`, reportWidth));
-    lines.push(...wrapText(`COMANDA FINAL:   #${lastOrder}`, reportWidth));
+    lines.push(...wrapText(`COMANDA INICIAL: ${firstOrder === 'N/A' ? 'N/A' : '#' + firstOrder}`, reportWidth));
+    lines.push(...wrapText(`COMANDA FINAL:   ${lastOrder === 'N/A' ? 'N/A' : '#' + lastOrder}`, reportWidth));
 
     // Desglose de Deliverys de Comandas Facturadas
     const cashOrders = (data.orders || []).filter((o) =>
@@ -1921,9 +1924,10 @@ function buildCrispysCierreTicket(data) {
   lines.push(`CAJERO A CARGO: _________`);
   lines.push(divider('-'));
 
-  // Calcular los totales de cada método de pago con la MISMA lógica exacta de Sección 3 del reporte digital (reportService.ts)
-  const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-  const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+  const repCopRate = (data.orders || []).find((o) => Number(o.copRateAtPayment || o.cop_rate_at_payment) > 0)?.copRateAtPayment;
+  const repBsRate = (data.orders || []).find((o) => Number(o.bsRateAtPayment || o.bs_rate_at_payment) > 0)?.bsRateAtPayment;
+  const copRateGlobal = Number(repCopRate) || Number(data.exchangeRates?.COP) || 3100;
+  const bsRateGlobal = Number(repBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
 
   const methodNames = [
     'Efectivo USD',

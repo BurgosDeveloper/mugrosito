@@ -910,8 +910,10 @@ export class ReportService {
     const billedOrderIds = new Set(billedOrders.map((o) => o.id));
     const cashItems = (data.items || []).filter((it) => billedOrderIds.has(it.orderId));
 
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const repCopRate = data.orders.find((o) => Number(o.copRateAtPayment) > 0)?.copRateAtPayment;
+    const repBsRate = data.orders.find((o) => Number(o.bsRateAtPayment) > 0)?.bsRateAtPayment;
+    const copRateGlobal = Number(repCopRate) || Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(repBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
 
     const cat = this.categorizeReportItems(cashItems, billedOrders, copRateGlobal, bsRateGlobal);
 
@@ -1025,8 +1027,10 @@ export class ReportService {
 
     const allRows = [...orderRows, ...manualRows].join('');
 
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const repCopRate = data.orders.find((o) => Number(o.copRateAtPayment) > 0)?.copRateAtPayment;
+    const repBsRate = data.orders.find((o) => Number(o.bsRateAtPayment) > 0)?.bsRateAtPayment;
+    const copRateGlobal = Number(repCopRate) || Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(repBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
     const totalRecaudadoCOP = totals.cop + (totals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (totals.bs * bsRateGlobal) : 0);
     const totalRecaudadoUSD = copRateGlobal > 0 ? (totalRecaudadoCOP / copRateGlobal) : totals.usd;
 
@@ -1063,8 +1067,10 @@ export class ReportService {
       return `<tr><td>${this.reportDate(transaction.timestamp)}</td><td>${this.escapeHtml(transaction.description)}</td><td>${this.escapeHtml(this.paymentMethodLabel(transaction.paymentMethod))}</td><td>${curr}</td><td style="text-align:right; color:#dc2626; font-weight:700;">-${amount}</td></tr>`;
     }).join('');
 
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const repExpensesCopRate = data.orders.find((o) => Number(o.copRateAtPayment) > 0)?.copRateAtPayment;
+    const repExpensesBsRate = data.orders.find((o) => Number(o.bsRateAtPayment) > 0)?.bsRateAtPayment;
+    const copRateGlobal = Number(repExpensesCopRate) || Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(repExpensesBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
     const totalEgresosCOP = totals.cop + (totals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (totals.bs * bsRateGlobal) : 0);
     const totalEgresosUSD = copRateGlobal > 0 ? (totalEgresosCOP / copRateGlobal) : totals.usd;
 
@@ -1116,8 +1122,10 @@ export class ReportService {
     const billedTotals = { usd: 0, cop: 0, bs: 0 };
     const paymentsByOrder = new Map<string, ReporteIntervaloData['payments']>();
 
-    const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-    const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+    const repCopRate = data.orders.find((o) => Number(o.copRateAtPayment) > 0)?.copRateAtPayment;
+    const repBsRate = data.orders.find((o) => Number(o.bsRateAtPayment) > 0)?.bsRateAtPayment;
+    const copRateGlobal = Number(repCopRate) || Number(data.exchangeRates?.COP) || 3100;
+    const bsRateGlobal = Number(repBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
 
     const paymentsList = [...data.payments];
     data.orders.forEach((ord) => {
@@ -1283,8 +1291,8 @@ export class ReportService {
     const totalVentaFacturadaCOP = billedTotals.cop + (billedTotals.usd * copRateGlobal) + (bsRateGlobal > 0 ? (billedTotals.bs * bsRateGlobal) : 0);
     const totalVentaFacturadaUSD = copRateGlobal > 0 ? (totalVentaFacturadaCOP / copRateGlobal) : billedTotals.usd;
 
-    const firstOrder = data.orders[0]?.orderNumber || 'N/A';
-    const lastOrder = data.orders[data.orders.length - 1]?.orderNumber || 'N/A';
+    const firstOrder = data.orders[0]?.orderNumber ? String(data.orders[0].orderNumber).replace(/^#+/, '') : 'N/A';
+    const lastOrder = data.orders[data.orders.length - 1]?.orderNumber ? String(data.orders[data.orders.length - 1].orderNumber).replace(/^#+/, '') : 'N/A';
 
     // Desglose por Tipo de Pago (Columna de Moneda y Monto Facturado Neto)
     const methodRows = Array.from(methodTotals.entries())
@@ -1390,8 +1398,8 @@ export class ReportService {
       <table>
         <tbody>
           <tr><td><strong>Rango Fecha / Hora:</strong></td><td>${this.intervalTitle(data)}</td></tr>
-          <tr><td><strong>Comanda inicial:</strong></td><td>#${this.escapeHtml(firstOrder)}</td></tr>
-          <tr><td><strong>Comanda final:</strong></td><td>#${this.escapeHtml(lastOrder)}</td></tr>
+          <tr><td><strong>Comanda inicial:</strong></td><td>${firstOrder === 'N/A' ? 'N/A' : '#' + this.escapeHtml(firstOrder)}</td></tr>
+          <tr><td><strong>Comanda final:</strong></td><td>${lastOrder === 'N/A' ? 'N/A' : '#' + this.escapeHtml(lastOrder)}</td></tr>
         </tbody>
       </table>
 

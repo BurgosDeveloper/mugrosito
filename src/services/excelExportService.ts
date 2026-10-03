@@ -103,8 +103,10 @@ function paymentCurrency(method: string): 'USD' | 'COP' | 'Bs' {
 export function exportToExcel(data: ReporteIntervaloData): void {
   const wb = XLSX.utils.book_new();
 
-  const copRateGlobal = Number(data.exchangeRates?.COP) || 3100;
-  const bsRateGlobal = Number(data.exchangeRates?.Bs) || 3.2;
+  const repCopRate = data.orders.find((o) => Number(o.copRateAtPayment) > 0)?.copRateAtPayment;
+  const repBsRate = data.orders.find((o) => Number(o.bsRateAtPayment) > 0)?.bsRateAtPayment;
+  const copRateGlobal = Number(repCopRate) || Number(data.exchangeRates?.COP) || 3100;
+  const bsRateGlobal = Number(repBsRate) || Number(data.exchangeRates?.Bs) || 3.2;
 
   // --- Hoja 1: Totales Consolidados con Venta Neta ---
   const billedTotals = { usd: 0, cop: 0, bs: 0 };
@@ -239,8 +241,8 @@ export function exportToExcel(data: ReporteIntervaloData): void {
     ['Total Servicios Delivery', `${totalDeliveryServices} envíos ($${totalDeliveryUSD.toFixed(2)} USD)`],
     ['Total Adicionales / Extras', `${totalExtrasCount} extras ($${totalExtrasUSD.toFixed(2)} USD)`],
     [],
-    ['Comanda Inicial', data.orders.length > 0 ? `#${data.orders[0].orderNumber}` : 'N/A'],
-    ['Comanda Final', data.orders.length > 0 ? `#${data.orders[data.orders.length - 1].orderNumber}` : 'N/A'],
+    ['Comanda Inicial', data.orders.length > 0 ? `#${String(data.orders[0].orderNumber || '').replace(/^#+/, '')}` : 'N/A'],
+    ['Comanda Final', data.orders.length > 0 ? `#${String(data.orders[data.orders.length - 1].orderNumber || '').replace(/^#+/, '')}` : 'N/A'],
   ];
   const ws1 = XLSX.utils.aoa_to_sheet(totalesData);
   ws1['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 18 }, { wch: 18 }];

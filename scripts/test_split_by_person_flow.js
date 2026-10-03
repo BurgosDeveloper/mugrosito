@@ -11,12 +11,17 @@ async function testSplitFlow() {
   const itemId2 = 'item-2-' + Date.now();
   const itemId3 = 'item-3-' + Date.now();
 
-  // Create order with 3 items (each 10000 COP, total 30000 COP)
-  await query(
-    `INSERT INTO orders (id, order_number, type, status, payment_status, total_usd, total_cop, shift, cop_rate_at_payment, bs_rate_at_payment)
-     VALUES ($1, '9999', 'mesa', 'entregada', 'no_pagado', 9.68, 30000, 'ambos', 3100, 3.2)`,
-    [orderId]
-  );
+  await query(`DELETE FROM order_payments WHERE order_id LIKE 'test-split-%'`);
+  await query(`DELETE FROM order_items WHERE order_id LIKE 'test-split-%'`);
+  await query(`DELETE FROM orders WHERE id LIKE 'test-split-%'`);
+
+  try {
+    // Create order with 3 items (each 10000 COP, total 30000 COP)
+    await query(
+      `INSERT INTO orders (id, order_number, type, status, payment_status, total_usd, total_cop, shift, cop_rate_at_payment, bs_rate_at_payment)
+       VALUES ($1, '9999', 'mesa', 'entregada', 'no_pagado', 9.68, 30000, 'ambos', 3100, 3.2)`,
+      [orderId]
+    );
 
   await query(
     `INSERT INTO order_items (id, order_id, product_id, product_name, price, quantity, is_paid_individually, paid_by_name)
@@ -112,10 +117,12 @@ async function testSplitFlow() {
   }
   console.log('✅ Order finalized successfully as pagado!');
 
-  // Clean up
-  await query('DELETE FROM order_payments WHERE order_id = $1', [orderId]);
-  await query('DELETE FROM order_items WHERE order_id = $1', [orderId]);
-  await query('DELETE FROM orders WHERE id = $1', [orderId]);
+  } finally {
+    // Clean up reliably
+    await query('DELETE FROM order_payments WHERE order_id = $1 OR order_id LIKE \'test-split-%\'', [orderId]);
+    await query('DELETE FROM order_items WHERE order_id = $1 OR order_id LIKE \'test-split-%\'', [orderId]);
+    await query('DELETE FROM orders WHERE id = $1 OR id LIKE \'test-split-%\'', [orderId]);
+  }
   console.log('✅ ALL SPLIT PERSON FLOW TESTS PASSED 100%!');
   console.log('4 PASSED | 0 FAILED');
   process.exit(0);

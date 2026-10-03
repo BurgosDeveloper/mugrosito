@@ -54,12 +54,17 @@ async function runDeepAudit() {
   // Set rates in DB for consistency
   await query(`UPDATE shift_exchange_rates SET cop_rate = $1, bs_rate = $2 WHERE shift = 'ambos'`, [copRate, bsRate]);
 
-  // -------------------------------------------------------------------------
-  // SCENARIO 1: Multi-Currency Split Payment with Exact Change (Dinero & Items)
-  // -------------------------------------------------------------------------
-  console.log('📋 Test 1: Comanda con 3 ítems cobrada a 3 personas en 3 monedas distintas (COP, USD, Bs)');
-  const orderId = `audit-ord-${Date.now()}`;
-  const it1Id = `it-1-${Date.now()}`;
+  await query(`DELETE FROM order_payments WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+  await query(`DELETE FROM order_items WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+  await query(`DELETE FROM orders WHERE id LIKE 'audit-%' OR id LIKE 'test-%'`);
+
+  try {
+    // -------------------------------------------------------------------------
+    // SCENARIO 1: Multi-Currency Split Payment with Exact Change (Dinero & Items)
+    // -------------------------------------------------------------------------
+    console.log('📋 Test 1: Comanda con 3 ítems cobrada a 3 personas en 3 monedas distintas (COP, USD, Bs)');
+    const orderId = `audit-ord-${Date.now()}`;
+    const it1Id = `it-1-${Date.now()}`;
   const it2Id = `it-2-${Date.now()}`;
   const it3Id = `it-3-${Date.now()}`;
 
@@ -302,10 +307,12 @@ async function runDeepAudit() {
   assert(Number(afterDeleteOrder[0].paid_amount_usd) === 0, 'paid_amount_usd vuelve a 0');
   assert(afterDeleteOrder[0].payment_status === 'no_pagado', 'payment_status vuelve a "no_pagado"');
 
-  // Cleanup test orders
-  await query('DELETE FROM order_payments WHERE order_id IN ($1, $2)', [orderId, orderMultiId]);
-  await query('DELETE FROM order_items WHERE order_id IN ($1, $2)', [orderId, orderMultiId]);
-  await query('DELETE FROM orders WHERE id IN ($1, $2)', [orderId, orderMultiId]);
+  } finally {
+    // Cleanup test orders reliably
+    await query(`DELETE FROM order_payments WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+    await query(`DELETE FROM order_items WHERE order_id LIKE 'audit-%' OR order_id LIKE 'test-%'`);
+    await query(`DELETE FROM orders WHERE id LIKE 'audit-%' OR id LIKE 'test-%'`);
+  }
 
   console.log('\n======================================================================');
   console.log(`  RESUMEN: ${testsPassed} PRUEBAS APROBADAS | ${testsFailed} FALLIDAS`);

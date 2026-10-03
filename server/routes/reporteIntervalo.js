@@ -152,6 +152,19 @@ module.exports = function (io) {
         paymentRows = rows;
       }
 
+      // 4. Tasas de cambio (priorizar la tasa histórica de las órdenes del intervalo si existen)
+      const { rows: rateRows } = await query(
+        `SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = $1`,
+        [req.user.shift]
+      );
+      const currentCopRate = Number(rateRows[0]?.cop_rate) || 3100;
+      const currentBsRate = Number(rateRows[0]?.bs_rate) || 3.2;
+
+      const histCopRate = orderRows.find((o) => Number(o.cop_rate_at_payment) > 0)?.cop_rate_at_payment;
+      const histBsRate = orderRows.find((o) => Number(o.bs_rate_at_payment) > 0)?.bs_rate_at_payment;
+      const copRate = Number(histCopRate) || currentCopRate;
+      const bsRate = Number(histBsRate) || currentBsRate;
+
       // Garantizar que toda orden facturada o a crédito en el intervalo tenga su pago computado
       for (const ord of orderRows) {
         const hasPayment = paymentRows.some((p) => p.order_id === ord.id);
@@ -182,7 +195,7 @@ module.exports = function (io) {
         }
       }
 
-      // 4. Transacciones de caja en el rango
+      // 5. Transacciones de caja en el rango
       const { rows: txRows } = await query(
         `SELECT tx.*, o.order_number
          FROM caja_chica_transactions tx
@@ -217,7 +230,7 @@ module.exports = function (io) {
         }
       }
 
-      // 5. Ediciones de órdenes en el rango
+      // 6. Ediciones de órdenes en el rango
       let editRows = [];
       try {
         const { rows } = await query(
@@ -234,24 +247,38 @@ module.exports = function (io) {
         console.warn('Aviso: tabla order_edits no disponible:', e.message);
       }
 
-      // 6. Tasas de cambio actuales
-      const { rows: rateRows } = await query(
-        `SELECT cop_rate, bs_rate FROM shift_exchange_rates WHERE shift = $1`,
-        [req.user.shift]
-      );
-      const copRate = Number(rateRows[0]?.cop_rate) || 3100;
-      const bsRate = Number(rateRows[0]?.bs_rate) || 3.2;
-
-      // 7. Fondo de apertura de caja chica para el turno
+      // 7. Fondo de apertura de caja chica correspondiente al intervalo
+      const aperturaShiftFilter = req.user.shift === 'ambos' ? '' : 'AND shift = $2';
+      const aperturaParams = req.user.shift === 'ambos' ? [toClean] : [toClean, req.user.shift];
       const { rows: aperturaRows } = await query(
-        `SELECT * FROM caja_chica_apertura${req.user.shift === 'ambos' ? '' : ' WHERE shift = $1'} ORDER BY timestamp DESC LIMIT 1`,
-        req.user.shift === 'ambos' ? [] : [req.user.shift]
+        `SELECT * FROM caja_chica_apertura
+         WHERE timestamp <= $1 ${aperturaShiftFilter}
+         ORDER BY timestamp DESC LIMIT 1`,
+        aperturaParams
       );
-      const apertura = aperturaRows[0] ? {
+      let apertura = aperturaRows[0] ? {
         usdCash: parseFloat(aperturaRows[0].usd_cash) || 0,
         copCash: parseFloat(aperturaRows[0].cop_cash) || 0,
         openedAt: aperturaRows[0].timestamp,
       } : { usdCash: 0, copCash: 0 };
+
+      // Si no hay apertura previa en caja_chica_apertura pero hay un cierre histórico en el rango, rescatar su apertura guardada
+      if (apertura.usdCash === 0 && apertura.copCash === 0) {
+        const { rows: cierreRows } = await query(
+          `SELECT * FROM caja_chica_cierres
+           WHERE closed_at >= $1 AND closed_at <= $2
+           ${req.user.shift === 'ambos' ? '' : 'AND shift = $3'}
+           ORDER BY closed_at ASC LIMIT 1`,
+          shiftParams
+        );
+        if (cierreRows[0] && (parseFloat(cierreRows[0].opened_usd) > 0 || parseFloat(cierreRows[0].opened_cop) > 0)) {
+          apertura = {
+            usdCash: parseFloat(cierreRows[0].opened_usd) || 0,
+            copCash: parseFloat(cierreRows[0].opened_cop) || 0,
+            openedAt: cierreRows[0].closed_at,
+          };
+        }
+      }
 
       // Construir respuesta estructurada
       const orders = orderRows.map((ord) => ({
