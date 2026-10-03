@@ -47,6 +47,20 @@ export const MeseroPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSubTab = searchParams.get('tab') || 'pedidos';
 
+  const isOrderSettled = (o: Order) =>
+    o.paymentStatus === 'pagado' ||
+    o.paymentStatus === 'credito' ||
+    o.paymentMethod === 'Crédito' ||
+    (o as any).type === 'credito' ||
+    (Number(o.paidAmountUSD || 0) >= Number(o.totalUSD || 0) - 0.01 && Number(o.totalUSD || 0) > 0);
+
+  const activeOrdersForTab = orders.filter(
+    (o) =>
+      o.status !== 'cancelado' &&
+      o.status !== 'fusionada' &&
+      !(o.status === 'entregada' && isOrderSettled(o))
+  );
+
   // Target of active order (Mesa, Delivery, PickUp)
   const [activeOrderTarget, setActiveOrderTarget] = useState<{
     type: 'mesa' | 'delivery' | 'pickup';
@@ -583,20 +597,19 @@ export const MeseroPage: React.FC = () => {
                 <span>{isCompactComandasView ? 'Modo Compacto (50+)' : 'Modo Extendido'}</span>
               </button>
               <span className="text-[11px] text-gray-500 font-bold bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
-                Total: {orders.filter((o) => o.status !== 'cancelado' && o.status !== 'fusionada').length}
+                Total: {activeOrdersForTab.length}
               </span>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto pr-1">
-            {orders.filter((o) => o.status !== 'cancelado' && o.status !== 'fusionada').length === 0 ? (
+            {activeOrdersForTab.length === 0 ? (
               <div className="p-8 text-center text-gray-400 text-xs font-bold">
                 No hay comandas activas en este momento.
               </div>
             ) : isCompactComandasView ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-                {orders
-                  .filter((o) => o.status !== 'cancelado' && o.status !== 'fusionada')
+                {activeOrdersForTab
                   .map((ord) => {
                     const isReady = ord.status === 'preparada';
                     const isExpanded = expandedOrderIds.includes(ord.id);
@@ -777,8 +790,7 @@ export const MeseroPage: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                {orders
-                  .filter((o) => o.status !== 'cancelado' && o.status !== 'fusionada')
+                {activeOrdersForTab
                   .map((ord) => {
                     const isReady = ord.status === 'preparada';
                     return (

@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppProvider, useApp } from './context/AppContext';
-import { PaymentMethod, OrderItem, Product, MOCK_EXTRAS, ExtraIngredient } from './data/mockData';
+import { PaymentMethod, OrderItem, Product, MOCK_EXTRAS, ExtraIngredient, Order } from './data/mockData';
 
 const NativeAppContent: React.FC = () => {
   const {
@@ -419,7 +419,14 @@ const NativeAppContent: React.FC = () => {
   const readyKitchenOrders = kitchenOrdersNative.filter((o) => o.status === 'preparada');
   const displayedKitchenOrders = kitchenTab === 'listas' ? readyKitchenOrders : pendingKitchenOrders;
 
-  const activeComandas = orders.filter((o) => !(o.status === 'entregada' && o.paymentStatus === 'pagado') && o.status !== 'fusionada');
+  const isOrderSettledNative = (o: Order) =>
+    o.paymentStatus === 'pagado' ||
+    o.paymentStatus === 'credito' ||
+    o.paymentMethod === 'Crédito' ||
+    (o as any).type === 'credito' ||
+    (Number(o.paidAmountUSD || 0) >= Number(o.totalUSD || 0) - 0.01 && Number(o.totalUSD || 0) > 0);
+
+  const activeComandas = orders.filter((o) => !(o.status === 'entregada' && isOrderSettledNative(o)) && o.status !== 'fusionada' && o.status !== 'cancelado');
 
   return (
     <SafeAreaView style={styles.safeArea}>

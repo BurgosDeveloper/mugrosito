@@ -947,19 +947,32 @@ function buildReportTicket(reportType, data) {
 
     const expenses = (data.transactions || []).filter((item) => item.type === 'egreso');
 
-    const creditOrders = (data.orders || []).filter((o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito');
-    const billedOrders = (data.orders || []).filter((o) => o.paymentStatus === 'pagado' || o.paymentStatus === 'credito');
+    const creditOrders = (data.orders || []).filter((o) =>
+      o.paymentStatus === 'credito' || o.payment_status === 'credito' ||
+      o.paymentMethod === 'Crédito' || o.payment_method === 'Crédito' ||
+      o.type === 'credito'
+    );
+    const billedOrders = (data.orders || []).filter((o) =>
+      o.paymentStatus === 'pagado' || o.payment_status === 'pagado' ||
+      o.paymentStatus === 'credito' || o.payment_status === 'credito' ||
+      o.paymentMethod === 'Crédito' || o.payment_method === 'Crédito' ||
+      o.type === 'credito'
+    );
     const billedOrderIds = new Set(billedOrders.map((o) => o.id));
-    const cashItems = (data.items || []).filter((item) => billedOrderIds.has(item.orderId));
+    const cashItems = (data.items || []).filter((item) => billedOrderIds.has(item.orderId || item.order_id));
 
-    const firstOrder = data.orders?.[0]?.orderNumber || 'N/A';
-    const lastOrder = data.orders?.[data.orders.length - 1]?.orderNumber || 'N/A';
+    const firstOrder = data.orders?.[0]?.orderNumber || data.orders?.[0]?.order_number || 'N/A';
+    const lastOrder = data.orders?.[data.orders.length - 1]?.orderNumber || data.orders?.[data.orders.length - 1]?.order_number || 'N/A';
 
     lines.push(...wrapText(`COMANDA INICIAL: #${firstOrder}`, reportWidth));
     lines.push(...wrapText(`COMANDA FINAL:   #${lastOrder}`, reportWidth));
 
     // Desglose de Deliverys de Comandas Facturadas
-    const cashOrders = (data.orders || []).filter((o) => o.paymentStatus === 'pagado' && o.paymentMethod !== 'Crédito');
+    const cashOrders = (data.orders || []).filter((o) =>
+      (o.paymentStatus === 'pagado' || o.payment_status === 'pagado') &&
+      o.paymentMethod !== 'Crédito' && o.payment_method !== 'Crédito' &&
+      o.type !== 'credito'
+    );
     const deliveryMap = new Map();
     for (const ord of billedOrders) {
       const ordCopRate = Number(ord.copRateAtPayment) || copRateGlobal;

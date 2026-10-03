@@ -551,6 +551,19 @@ module.exports = function(io) {
           ]
         );
 
+        if (isFullyPaid && !isDraft && order.type === 'mesa' && order.table_number) {
+          const { rows: currentStatusRows } = await client.query('SELECT status FROM orders WHERE id = $1', [id]);
+          if (currentStatusRows[0]?.status === 'entregada') {
+            const { rows: otherOrders } = await client.query(
+              `SELECT id FROM orders WHERE type = 'mesa' AND table_number = $1 AND id != $2 AND status NOT IN ('entregada', 'cancelado', 'fusionada') AND payment_status != 'credito' AND archived_at IS NULL`,
+              [order.table_number, id]
+            );
+            if (otherOrders.length === 0) {
+              await client.query(`UPDATE tables_config SET status = 'libre' WHERE number = $1`, [order.table_number]);
+            }
+          }
+        }
+
         await postCompletedOrderCashMovements(client, id);
 
         await client.query('COMMIT');
@@ -564,10 +577,12 @@ module.exports = function(io) {
       }
 
       const allOrders = await fetchAllOrders(req.user);
+      const allTables = await fetchAllTables(req.user);
       const updatedOrder = allOrders.find((o) => o.id === id);
 
       io.emit('order:paid', updatedOrder);
       io.emit('orders:sync', allOrders);
+      io.emit('tables:sync', allTables);
       io.emit('caja:updated');
 
       res.json(updatedOrder);

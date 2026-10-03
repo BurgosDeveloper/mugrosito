@@ -14,7 +14,7 @@ export const RoleSelectorPage: React.FC = () => {
   const { orders, isConnected } = useApp();
 
   const pendingKdsCount = orders.filter((o) => o.status === 'en_preparacion').length;
-  const unpaidCount = orders.filter((o) => o.paymentStatus === 'no_pagado').length;
+  const unpaidCount = orders.filter((o) => o.paymentStatus === 'no_pagado' && o.status !== 'cancelado' && o.status !== 'fusionada').length;
 
   const roleCards = [
     {

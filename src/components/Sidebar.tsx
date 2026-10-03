@@ -58,7 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const pendingKdsCount = orders.filter((o) => o.status === 'en_preparacion').length;
   const readyKdsCount = orders.filter((o) => o.status === 'preparada').length;
-  const unpaidCount = orders.filter((o) => o.paymentStatus === 'no_pagado').length;
+  const unpaidCount = orders.filter((o) => o.paymentStatus === 'no_pagado' && o.status !== 'cancelado' && o.status !== 'fusionada').length;
 
   const setSubTab = (tabName: string) => {
     setSearchParams({ tab: tabName });

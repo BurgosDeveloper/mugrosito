@@ -54,12 +54,19 @@ export const TableCompactGrid: React.FC<TableCompactGridProps> = ({
   onViewHistory,
   canPay = false,
 }) => {
-  // Comandas activas en curso
+  const isOrderSettled = (o: Order) =>
+    o.paymentStatus === 'pagado' ||
+    o.paymentStatus === 'credito' ||
+    o.paymentMethod === 'Crédito' ||
+    (o as any).type === 'credito' ||
+    (Number(o.paidAmountUSD || 0) >= Number(o.totalUSD || 0) - 0.01 && Number(o.totalUSD || 0) > 0);
+
+  // Comandas activas en curso (excluye canceladas, fusionadas, y entregadas que ya estén saldadas o a crédito)
   const activeOrders = orders.filter(
     (o) =>
       o.status !== 'cancelado' &&
       o.status !== 'fusionada' &&
-      !(o.status === 'entregada' && (o.paymentStatus === 'pagado' || o.paymentStatus === 'credito'))
+      !(o.status === 'entregada' && isOrderSettled(o))
   );
 
   // Separación por tipo de servicio con orden ascendente (más antigua primero, ej: #35 antes de #40)

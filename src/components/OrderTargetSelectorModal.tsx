@@ -19,12 +19,19 @@ export const OrderTargetSelectorModal: React.FC<OrderTargetSelectorModalProps> =
 }) => {
   if (!isOpen) return null;
 
+  const isOrderSettled = (o: Order) =>
+    o.paymentStatus === 'pagado' ||
+    o.paymentStatus === 'credito' ||
+    o.paymentMethod === 'Crédito' ||
+    (o as any).type === 'credito' ||
+    (Number(o.paidAmountUSD || 0) >= Number(o.totalUSD || 0) - 0.01 && Number(o.totalUSD || 0) > 0);
+
   // Identificar mesas con órdenes activas
   const activeOrders = orders.filter(
     (o) =>
       o.status !== 'cancelado' &&
       o.status !== 'fusionada' &&
-      !(o.status === 'entregada' && (o.paymentStatus === 'pagado' || o.paymentStatus === 'credito'))
+      !(o.status === 'entregada' && isOrderSettled(o))
   );
 
   const occupiedTableNumbers = new Set(

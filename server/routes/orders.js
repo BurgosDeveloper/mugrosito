@@ -231,14 +231,43 @@ module.exports = function(io) {
         return res.status(404).json({ error: 'Comanda no encontrada.' });
       }
       if (status === 'entregada') {
-        const { rows: ordRows } = await client.query('SELECT table_number, type FROM orders WHERE id = $1', [id]);
-        if (ordRows[0]?.type === 'mesa' && ordRows[0]?.table_number) {
-          const { rows: otherOrders } = await client.query(
-            `SELECT id FROM orders WHERE type = 'mesa' AND table_number = $1 AND id != $2 AND status NOT IN ('entregada', 'cancelado', 'fusionada') AND payment_status != 'credito' AND archived_at IS NULL`,
-            [ordRows[0].table_number, id]
+        const { rows: ordRows } = await client.query(
+          `SELECT id, order_number, type, table_number, payment_status, payment_method, total_usd, paid_amount_usd FROM orders WHERE id = $1`,
+          [id]
+        );
+        const currentOrd = ordRows[0];
+        if (currentOrd) {
+          const { rows: payRows } = await client.query(
+            `SELECT COALESCE(SUM(amount_paid_usd), 0) AS total_paid_usd FROM order_payments WHERE order_id = $1`,
+            [id]
           );
-          if (otherOrders.length === 0) {
-            await client.query(`UPDATE tables_config SET status = 'libre' WHERE number = $1`, [ordRows[0].table_number]);
+          const totalPaid = parseFloat(payRows[0]?.total_paid_usd || 0);
+          const ordTotal = parseFloat(currentOrd.total_usd || 0);
+          const ordPaidAmt = parseFloat(currentOrd.paid_amount_usd || 0);
+
+          const isCredit = currentOrd.payment_status === 'credito' || currentOrd.payment_method === 'Crédito' || currentOrd.type === 'credito';
+          const isCovered = (totalPaid >= ordTotal - 0.01 && ordTotal > 0) || (ordPaidAmt >= ordTotal - 0.01 && ordTotal > 0);
+
+          if (isCredit) {
+            await client.query(
+              `UPDATE orders SET payment_status = 'credito', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+              [id]
+            );
+          } else if (isCovered) {
+            await client.query(
+              `UPDATE orders SET payment_status = 'pagado', paid_amount_usd = GREATEST(paid_amount_usd, $1), updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+              [Math.max(totalPaid, ordTotal), id]
+            );
+          }
+
+          if (currentOrd.type === 'mesa' && currentOrd.table_number) {
+            const { rows: otherOrders } = await client.query(
+              `SELECT id FROM orders WHERE type = 'mesa' AND table_number = $1 AND id != $2 AND status NOT IN ('entregada', 'cancelado', 'fusionada') AND payment_status != 'credito' AND archived_at IS NULL`,
+              [currentOrd.table_number, id]
+            );
+            if (otherOrders.length === 0) {
+              await client.query(`UPDATE tables_config SET status = 'libre' WHERE number = $1`, [currentOrd.table_number]);
+            }
           }
         }
       }
@@ -548,7 +577,7 @@ module.exports = function(io) {
       await assertOrderAccess(client, req.user, id);
 
       const { rows: orderRows } = await client.query(
-        `SELECT id, order_number, type, table_number, payment_status, shift FROM orders WHERE id = $1 FOR UPDATE`,
+        `SELECT id, order_number, type, table_number, payment_status, payment_method, total_usd, paid_amount_usd, shift FROM orders WHERE id = $1 FOR UPDATE`,
         [id]
       );
       if (orderRows.length === 0) {
@@ -559,14 +588,23 @@ module.exports = function(io) {
       }
       const ord = orderRows[0];
 
-      const isCreditOrder = ord.payment_status === 'credito' || ord.type === 'credito';
+      const { rows: paymentRows } = await client.query(
+        `SELECT COALESCE(SUM(amount_paid_usd), 0) AS total_paid_usd FROM order_payments WHERE order_id = $1`,
+        [id]
+      );
+      const totalPaidUSD = parseFloat(paymentRows[0]?.total_paid_usd || 0);
+      const totalUSD = parseFloat(ord.total_usd || 0);
+      const paidAmountUSD = parseFloat(ord.paid_amount_usd || 0);
+
+      const isCreditOrder = ord.payment_status === 'credito' || ord.type === 'credito' || ord.payment_method === 'Crédito';
+      const isAlreadyPaid = (totalPaidUSD >= totalUSD - 0.01 && totalUSD > 0) || (paidAmountUSD >= totalUSD - 0.01 && totalUSD > 0);
 
       if (isCreditOrder) {
-        // Al reactivar una comanda que estaba a crédito, su tipo pasa a ser 'credito' permanente sin ocupar mesa física
+        // Al reactivar una comanda que estaba a crédito, su tipo pasa a ser 'credito' permanente sin ocupar mesa física y preserva su estatus de crédito
         await client.query(
           `UPDATE orders SET
             status = 'preparada',
-            payment_status = 'no_pagado',
+            payment_status = 'credito',
             type = 'credito',
             table_number = NULL,
             updated_at = CURRENT_TIMESTAMP
@@ -574,13 +612,14 @@ module.exports = function(io) {
           [id]
         );
       } else {
+        const nextPaymentStatus = isAlreadyPaid ? 'pagado' : 'no_pagado';
         await client.query(
           `UPDATE orders SET
             status = 'preparada',
-            payment_status = 'no_pagado',
+            payment_status = $1,
             updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [id]
+           WHERE id = $2`,
+          [nextPaymentStatus, id]
         );
 
         // Si es comanda de mesa normal, marcar la mesa como ocupada
@@ -1205,9 +1244,37 @@ module.exports = function(io) {
         nextStatus = 'en_preparacion';
       }
 
-      const updateFields = ['total_usd = $1', 'total_cop = $2', 'status = $3', 'delivery_fee_usd = $4', 'delivery_fee_cop = $5', 'updated_at = CURRENT_TIMESTAMP'];
-      const updateValues = [newTotalUSD, newTotalCOP, nextStatus, deliveryFeeUSD, deliveryFeeCOP, id];
-      let paramIdx = 7;
+      // Verificar estado de pago frente al nuevo total recalculado
+      const { rows: payRows } = await client.query(
+        `SELECT COALESCE(SUM(amount_paid_usd), 0) AS total_paid_usd FROM order_payments WHERE order_id = $1`,
+        [id]
+      );
+      const totalPaidUSD = parseFloat(payRows[0]?.total_paid_usd || 0);
+      const currentPaidUSD = Math.max(totalPaidUSD, parseFloat(order.paid_amount_usd || 0));
+
+      const isCredit = order.payment_status === 'credito' || order.type === 'credito' || order.payment_method === 'Crédito';
+
+      let nextPaymentStatus = order.payment_status;
+      if (isCredit) {
+        nextPaymentStatus = 'credito';
+        await client.query(
+          `UPDATE order_payments SET amount_paid_usd = $1, cash_tendered_cop = $2 WHERE order_id = $3 AND payment_method = 'Crédito'`,
+          [newTotalUSD, newTotalCOP, id]
+        );
+      } else if (currentPaidUSD >= newTotalUSD - 0.01 && newTotalUSD > 0) {
+        nextPaymentStatus = 'pagado';
+      } else {
+        nextPaymentStatus = 'no_pagado';
+      }
+
+      const updateFields = ['total_usd = $1', 'total_cop = $2', 'status = $3', 'delivery_fee_usd = $4', 'delivery_fee_cop = $5', 'payment_status = $6', 'updated_at = CURRENT_TIMESTAMP'];
+      const updateValues = [newTotalUSD, newTotalCOP, nextStatus, deliveryFeeUSD, deliveryFeeCOP, nextPaymentStatus, id];
+      let paramIdx = 8;
+
+      if (isCredit) {
+        updateFields.push(`paid_amount_usd = $${paramIdx++}`);
+        updateValues.push(newTotalUSD);
+      }
 
       if (customerName && customerName.trim()) {
         updateFields.push(`customer_name = $${paramIdx++}`);
@@ -1219,9 +1286,13 @@ module.exports = function(io) {
       }
 
       await client.query(
-        `UPDATE orders SET ${updateFields.join(', ')} WHERE id = $6`,
+        `UPDATE orders SET ${updateFields.join(', ')} WHERE id = $7`,
         updateValues
       );
+
+      if (order.type === 'mesa' && order.table_number && nextPaymentStatus === 'no_pagado') {
+        await client.query(`UPDATE tables_config SET status = 'ocupada' WHERE number = $1`, [order.table_number]);
+      }
 
       // Registrar auditoría de edición en order_edits
       const editDetails = [];
@@ -1246,6 +1317,7 @@ module.exports = function(io) {
       client = null;
 
       const updatedOrdersList = await fetchAllOrders(req.user);
+      const updatedTablesList = await fetchAllTables(req.user);
       const updatedOrder = updatedOrdersList.find((o) => o.id === id);
 
       // Impresión térmica selectiva según destino
@@ -1263,6 +1335,7 @@ module.exports = function(io) {
       }
 
       io.emit('orders:sync', updatedOrdersList);
+      io.emit('tables:sync', updatedTablesList);
       io.emit('order:status_updated', updatedOrder);
 
       console.log(`➕ [ADICIÓN A COMANDA] #${order.order_number} (${order.type.toUpperCase()}) | ${addedItems.length} ítems añadidos | Nuevo Total: $${newTotalUSD} USD`);

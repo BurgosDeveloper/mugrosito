@@ -205,7 +205,10 @@ export const CajaPage: React.FC = () => {
   const [reporteError, setReporteError] = useState<string>('');
 
   const isOrderCredit = (o: Order) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || (o as any).type === 'credito';
-  const isOrderPaidOrCredit = (o: Order) => o.paymentStatus === 'pagado' || isOrderCredit(o);
+  const isOrderPaidOrCredit = (o: Order) =>
+    o.paymentStatus === 'pagado' ||
+    isOrderCredit(o) ||
+    (Number(o.paidAmountUSD || 0) >= Number(o.totalUSD || 0) - 0.01 && Number(o.totalUSD || 0) > 0);
 
   // Comandas activas no finalizadas/pagadas totalmente (excluye canceladas, fusionadas, pagadas y créditos ya entregados)
   const activeComandas = orders.filter(

@@ -454,23 +454,33 @@ module.exports = function(io) {
   router.get('/reporte-diario', requireRole('caja', 'admin'), async (req, res) => {
     try {
       const orders = await fetchAllOrders();
-      const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado');
+      const isCredit = (o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || o.type === 'credito';
+      const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado' && !isCredit(o));
+      const creditOrders = orders.filter((o) => isCredit(o));
+      const billedOrders = orders.filter((o) => (o.paymentStatus === 'pagado' || isCredit(o)) && o.status !== 'cancelado');
 
-      const totalUSD = paidOrders.reduce((sum, o) => sum + o.totalUSD, 0);
+      const totalUSD = billedOrders.reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0);
+      const totalCreditUSD = creditOrders.reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0);
+      const totalCashUSD = paidOrders.reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0);
 
       const byMethod = {
-        Divisas: paidOrders.filter((o) => o.paymentMethod === 'Divisas').reduce((sum, o) => sum + o.totalUSD, 0),
-        COP: paidOrders.filter((o) => o.paymentMethod === 'COP').reduce((sum, o) => sum + o.totalUSD, 0),
-        Bs: paidOrders.filter((o) => o.paymentMethod === 'Bs').reduce((sum, o) => sum + o.totalUSD, 0),
-        Binance: paidOrders.filter((o) => o.paymentMethod === 'Binance').reduce((sum, o) => sum + o.totalUSD, 0),
+        Divisas: paidOrders.filter((o) => o.paymentMethod === 'Divisas' || o.paymentMethod === 'Efectivo USD').reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0),
+        COP: paidOrders.filter((o) => o.paymentMethod === 'COP' || o.paymentMethod === 'Efectivo COP' || o.paymentMethod === 'Bancolombia' || o.paymentMethod === 'Nequi').reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0),
+        Bs: paidOrders.filter((o) => o.paymentMethod === 'Bs' || o.paymentMethod === 'Pago Móvil' || o.paymentMethod === 'Tarjeta de Débito').reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0),
+        Binance: paidOrders.filter((o) => o.paymentMethod === 'Binance' || o.paymentMethod === 'Zelle').reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0),
+        Crédito: totalCreditUSD,
       };
 
       const { rows: historyCierres } = await query(`SELECT * FROM caja_chica_cierres ORDER BY closed_at DESC`);
 
       res.json({
         totalSalesUSD: totalUSD,
+        totalCashUSD,
+        totalCreditUSD,
         totalOrdersPaid: paidOrders.length,
-        pendingOrders: orders.filter((o) => o.paymentStatus === 'no_pagado').length,
+        totalOrdersCredit: creditOrders.length,
+        totalOrdersBilled: billedOrders.length,
+        pendingOrders: orders.filter((o) => o.paymentStatus === 'no_pagado' && o.status !== 'cancelado' && o.status !== 'fusionada').length,
         byPaymentMethod: byMethod,
         historyCierres,
       });
@@ -485,40 +495,41 @@ module.exports = function(io) {
       const { message } = req.body;
       const lower = (message || '').toLowerCase();
       const orders = await fetchAllOrders();
-      const paidOrders = orders.filter((o) => o.paymentStatus === 'pagado');
+      const isCredit = (o) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || o.type === 'credito';
+      const billedOrders = orders.filter((o) => (o.paymentStatus === 'pagado' || isCredit(o)) && o.status !== 'cancelado');
 
       let reply = 'Consulta procesada en Mugrosito.';
 
       if (lower.includes('hot dog') || lower.includes('perro') || lower.includes('mugrosito') || lower.includes('hamburguesa') || lower.includes('burger') || lower.includes('vendida') || lower.includes('top')) {
         const tally = {};
-        paidOrders.forEach((o) => {
-          o.items.forEach((it) => {
-            tally[it.productName] = (tally[it.productName] || 0) + it.quantity;
+        billedOrders.forEach((o) => {
+          (o.items || []).forEach((it) => {
+            tally[it.productName] = (tally[it.productName] || 0) + (it.quantity || 1);
           });
         });
         const entries = Object.entries(tally).sort((a, b) => b[1] - a[1]);
         if (entries.length === 0) {
-          reply = '🌭 No hay registros de hot dogs vendidos cobrados el día de hoy.';
+          reply = '🌭 No hay registros de hot dogs vendidos cobrados o a crédito el día de hoy.';
         } else {
-          reply = `🌭 Hot Dogs & Ítems Cobrados Hoy:\n` + entries.map(([name, qty]) => `• ${name}: ${qty} unidades`).join('\n');
+          reply = `🌭 Hot Dogs & Ítems Cobrados/Crédito Hoy:\n` + entries.map(([name, qty]) => `• ${name}: ${qty} unidades`).join('\n');
         }
       } else if (lower.includes('bebida') || lower.includes('refresco') || lower.includes('tomar')) {
         let drinkQty = 0;
-        paidOrders.forEach((o) => {
-          o.items.forEach((it) => {
+        billedOrders.forEach((o) => {
+          (o.items || []).forEach((it) => {
             if (it.productName.toLowerCase().includes('refresco') || it.productName.toLowerCase().includes('agua') || it.productName.toLowerCase().includes('bebida') || it.productName.toLowerCase().includes('jugo')) {
-              drinkQty += it.quantity;
+              drinkQty += (it.quantity || 1);
             }
           });
         });
-        reply = `🥤 Total de Bebidas Cobradas hoy: ${drinkQty} unidades.`;
+        reply = `🥤 Total de Bebidas Vendidas hoy: ${drinkQty} unidades.`;
       } else if (lower.includes('caja') || lower.includes('cuadro') || lower.includes('resumen') || lower.includes('cierre')) {
-        const totalUSD = paidOrders.reduce((sum, o) => sum + o.totalUSD, 0);
-        const pendingCount = orders.filter((o) => o.paymentStatus === 'no_pagado').length;
-        reply = `💰 Resumen de Caja & Cierre:\n• Recaudado Total: $${totalUSD.toFixed(2)} USD\n• Comandas Cobradas: ${paidOrders.length}\n• Comandas Pendientes: ${pendingCount}`;
+        const totalUSD = billedOrders.reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0);
+        const pendingCount = orders.filter((o) => o.paymentStatus === 'no_pagado' && o.status !== 'cancelado' && o.status !== 'fusionada').length;
+        reply = `💰 Resumen de Caja & Cierre:\n• Recaudado/Crédito Total: $${totalUSD.toFixed(2)} USD\n• Comandas Facturadas: ${billedOrders.length}\n• Comandas Pendientes: ${pendingCount}`;
       } else {
-        const totalUSD = paidOrders.reduce((sum, o) => sum + o.totalUSD, 0);
-        reply = `🤖 Asistente de Caja: Hay ${orders.length} comandas registradas (${paidOrders.length} cobradas) por un total de $${totalUSD.toFixed(2)} USD.`;
+        const totalUSD = billedOrders.reduce((sum, o) => sum + (Number(o.totalUSD) || 0), 0);
+        reply = `🤖 Asistente de Caja: Hay ${orders.length} comandas registradas (${billedOrders.length} facturadas) por un total de $${totalUSD.toFixed(2)} USD.`;
       }
 
       res.json({ reply });
