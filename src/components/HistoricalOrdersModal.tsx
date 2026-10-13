@@ -58,6 +58,7 @@ export const HistoricalOrdersModal: React.FC<HistoricalOrdersModalProps> = ({ is
       setError('');
       setPrintStatus('');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const loadOrders = async (

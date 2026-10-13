@@ -334,6 +334,7 @@ module.exports = function(io) {
           total_cop = COALESCE(NULLIF(total_cop, 0), $7),
           type = 'credito',
           table_number = NULL,
+          debtor_name = $1,
           customer_name = $1,
           cop_rate_at_payment = $2,
           bs_rate_at_payment = $3,
