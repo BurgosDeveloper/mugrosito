@@ -102,6 +102,11 @@ async function run() {
     const ord2Check = await client.query('SELECT * FROM orders WHERE id = $1', [ord2Id]);
     assert(ord2Check.rows[0].status === 'fusionada', `Source order marked as 'fusionada'`);
 
+    const table2Check = await client.query('SELECT status FROM tables_config WHERE number = 2');
+    if (table2Check.rows[0]) {
+      assert(table2Check.rows[0].status === 'libre', `Table 2 freed after its order was merged into Table 1`);
+    }
+
     // 3. Test Transfer Service: Transfer order 1 to delivery with 2000 COP delivery fee
     const transferRes = await request('PATCH', `/api/orders/${ord1Id}/transfer-service`, {
       action: 'to-delivery',

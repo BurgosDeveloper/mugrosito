@@ -1005,10 +1005,27 @@ module.exports = function(io) {
         [`Fusionada en Comanda ${targetOrder.orderNumber}`, sourceOrderIds]
       );
 
+      // Liberar las mesas de las comandas fusionadas si estaban en otras mesas
+      const targetTableNumber = targetOrder.tableNumber || targetOrder.table_number;
+      for (const sOrd of sourceOrders) {
+        const sTableNumber = sOrd.tableNumber || sOrd.table_number;
+        if (sOrd.type === 'mesa' && sTableNumber && sTableNumber !== targetTableNumber) {
+          const { rows: otherOrders } = await query(
+            `SELECT id FROM orders WHERE type = 'mesa' AND table_number = $1 AND id != $2 AND status NOT IN ('entregada', 'cancelado', 'fusionada') AND payment_status != 'credito' AND archived_at IS NULL`,
+            [sTableNumber, sOrd.id]
+          );
+          if (otherOrders.length === 0) {
+            await query(`UPDATE tables_config SET status = 'libre' WHERE number = $1`, [sTableNumber]);
+          }
+        }
+      }
+
       const updatedOrdersList = await fetchAllOrders(req.user);
+      const allTables = await fetchAllTables(req.user);
       const updatedTarget = updatedOrdersList.find((o) => o.id === targetOrderId);
 
       io.emit('orders:sync', updatedOrdersList);
+      io.emit('tables:sync', allTables);
       io.emit('order:status_updated', updatedTarget);
 
       console.log(`🔗 [FUSIÓN DE COMANDAS] Comandas ${sourceNumbers} unificadas en Comanda ${mergedOrderNumber}`);
