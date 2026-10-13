@@ -365,6 +365,8 @@ function abbreviateFreeTopping(name = '') {
 function formatKitchenTime(dateValue) {
   const date = dateValue ? new Date(dateValue) : new Date();
   if (Number.isNaN(date.getTime())) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   let hours = date.getHours();
   const minutes = date.getMinutes();
   const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -372,7 +374,7 @@ function formatKitchenTime(dateValue) {
   hours = hours ? hours : 12;
   const strHours = hours < 10 ? `0${hours}` : `${hours}`;
   const strMinutes = minutes < 10 ? `0${minutes}` : `${minutes}`;
-  return `${strHours}:${strMinutes} ${ampm}`;
+  return `${month}/${day} ${strHours}:${strMinutes} ${ampm}`;
 }
 
 function orderHasSalonItem(order = {}) {
@@ -1345,7 +1347,7 @@ function buildKitchenTicket(order, isFallback = false) {
     kitchenCentered('MUGROSITO'),
     `COMANDA: #${printableText(order.orderNumber)}`,
     '\x1Ba\x00',
-    `HORA: ${formatKitchenTime(order.createdAt)}`,
+    `FECHA: ${formatKitchenTime(order.createdAt)}`,
   );
 
   if (orderType === 'mesa' && order.tableNumber) {
@@ -1426,7 +1428,7 @@ function buildKitchenAdditionTicket(order, addedItems, isFallback = false) {
     'ADICION COCINA',
     `COMANDA: #${printableText(order.orderNumber)}`,
     '\x1Ba\x00',
-    `HORA: ${formatKitchenTime(new Date())}`,
+    `FECHA: ${formatKitchenTime(new Date())}`,
   );
 
   if (orderType === 'mesa' && order.tableNumber) {
@@ -1779,9 +1781,10 @@ function buildReceiptTicket(order, rates = {}) {
     ? 'DELIVERY'
     : 'PICKUP';
 
-  const dateStr = new Date(order.createdAt || Date.now()).toLocaleString('es-VE', {
-    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+  const isPaid = (order.paymentStatus === 'pagado' || order.payment_status === 'pagado') || 
+    (Array.isArray(order.paymentHistory) && order.paymentHistory.length > 0 && Number(order.paidAmountUSD || order.paid_amount_usd || 0) >= totalUSD);
+  const isCredit = order.paymentStatus === 'credito' || order.payment_status === 'credito' || order.type === 'credito';
+  const receiptTitle = isCredit ? 'COMPROBANTE A CREDITO' : (isPaid ? 'RECIBO DE PAGO' : 'PRE-CUENTA / CONSUMO');
 
   const lines = [
     '\x1B@',
@@ -1790,12 +1793,12 @@ function buildReceiptTicket(order, rates = {}) {
     '\x1Ba\x01',
     '\x1BE\x01',
     'MUGROSITO',
-    'PRE-CUENTA / CONSUMO',
+    receiptTitle,
     '\x1BE\x00',
     '\x1Ba\x00',
     divider('-'),
     `COMANDA: #${cleanOrderNumber} | ${srvType}`,
-    `FECHA: ${dateStr}`,
+    `FECHA: ${formatKitchenTime(order.createdAt || Date.now())}`,
   ];
 
   if (order.customerName) {
@@ -1883,6 +1886,80 @@ function buildReceiptTicket(order, rates = {}) {
   lines.push(formatTwoColumns('TOTAL USD:', `$${totalUSDVal.toFixed(2)}`, KITCHEN_LINE_WIDTH));
   lines.push(formatTwoColumns('TOTAL Bs:', `${totalBsVal}`, KITCHEN_LINE_WIDTH));
   lines.push('\x1D!\x00\x1BE\x00', PRINT_FORMAT_RESET, PRINT_FORMAT_SETUP);
+
+  // Sección de desglose de pagos y vueltos (cuando la comanda está pagada, a crédito o tiene pagos)
+  const paymentsList = Array.isArray(order.paymentHistory) ? order.paymentHistory : (Array.isArray(order.payments) ? order.payments : []);
+  if (isPaid || isCredit || paymentsList.length > 0) {
+    lines.push(divider('-'));
+    lines.push('\x1Ba\x01', '\x1BE\x01', 'DETALLE DE PAGO', '\x1BE\x00', '\x1Ba\x00');
+    lines.push(formatTwoColumns('METODO', 'MONTO', LINE_WIDTH));
+    lines.push(divider('-', LINE_WIDTH));
+
+    if (isCredit) {
+      const debtor = printableText(order.debtorName || order.debtor_name || order.customerName || 'Cliente').substring(0, 18);
+      lines.push(formatTwoColumns('CREDITO', `${Math.round(totalCOPVal).toLocaleString('es-CO')} COP`, LINE_WIDTH));
+      lines.push(`DEUDOR: ${debtor}`);
+    } else if (paymentsList.length > 0) {
+      const validPayments = paymentsList.filter((pm) => pm.entryType !== 'change' && (Number(pm.amountPaidUSD || 0) > 0 || Number(pm.cashTenderedCOP || 0) > 0 || Number(pm.cashTenderedUSD || 0) > 0 || Number(pm.cashTenderedBs || 0) > 0));
+      const listToDisplay = validPayments.length > 0 ? validPayments : paymentsList;
+
+      for (const pm of listToDisplay) {
+        const rawMethod = printableText(pm.paymentMethod || pm.method || 'PAGO').toUpperCase();
+        const pCopRate = Number(pm.copRate || copRate || 3100);
+        const pBsRate = Number(pm.bsRate || bsRate || 3.2);
+
+        let amountLabel = '';
+        const tenderCOP = Number(pm.cashTenderedCOP || 0);
+        const tenderUSD = Number(pm.cashTenderedUSD || 0);
+        const tenderBs = Number(pm.cashTenderedBs || 0);
+
+        if (tenderCOP > 0) {
+          amountLabel = `${Math.round(tenderCOP).toLocaleString('es-CO')} COP`;
+        } else if (tenderUSD > 0) {
+          amountLabel = `$${tenderUSD.toFixed(2)} USD`;
+        } else if (tenderBs > 0) {
+          amountLabel = `${tenderBs.toFixed(2)} Bs`;
+        } else if (pm.currency === 'COP' || rawMethod.includes('COP') || rawMethod.includes('BANCOLOMBIA') || rawMethod.includes('NEQUI')) {
+          const amtCOP = Math.round(Number(pm.amountPaidUSD || 0) * pCopRate);
+          amountLabel = `${amtCOP.toLocaleString('es-CO')} COP`;
+        } else if (pm.currency === 'Bs' || rawMethod.includes('BS') || rawMethod.includes('MOVIL') || rawMethod.includes('PUNTO')) {
+          const amtBs = (Number(pm.amountPaidUSD || 0) * pBsRate).toFixed(2);
+          amountLabel = `${amtBs} Bs`;
+        } else {
+          amountLabel = `$${Number(pm.amountPaidUSD || 0).toFixed(2)} USD`;
+        }
+
+        lines.push(formatTwoColumns(rawMethod, amountLabel, LINE_WIDTH));
+      }
+
+      // Sumar vueltos registrados
+      let totalVueltoCOP = 0;
+      let totalVueltoUSD = 0;
+      let totalVueltoBs = 0;
+      for (const pm of paymentsList) {
+        totalVueltoCOP += Number(pm.changeGivenCOP || pm.change_given_cop || 0);
+        totalVueltoUSD += Number(pm.changeGivenUSD || pm.change_given_usd || 0);
+        totalVueltoBs += Number(pm.changeGivenBs || pm.change_given_bs || 0);
+      }
+
+      if (totalVueltoCOP > 0 || totalVueltoUSD > 0 || totalVueltoBs > 0) {
+        lines.push(divider('-', LINE_WIDTH));
+        if (totalVueltoCOP > 0) {
+          lines.push(formatTwoColumns('VUELTO:', `${Math.round(totalVueltoCOP).toLocaleString('es-CO')} COP`, LINE_WIDTH));
+        }
+        if (totalVueltoUSD > 0) {
+          lines.push(formatTwoColumns('VUELTO:', `$${totalVueltoUSD.toFixed(2)} USD`, LINE_WIDTH));
+        }
+        if (totalVueltoBs > 0) {
+          lines.push(formatTwoColumns('VUELTO:', `${totalVueltoBs.toFixed(2)} Bs`, LINE_WIDTH));
+        }
+      }
+    } else {
+      const singleMethod = printableText(order.paymentMethod || order.payment_method || 'EFECTIVO COP').toUpperCase();
+      lines.push(formatTwoColumns(singleMethod, `${Math.round(totalCOPVal).toLocaleString('es-CO')} COP`, LINE_WIDTH));
+    }
+  }
+
   lines.push(divider('-'));
   lines.push('\x1Ba\x01');
   lines.push('¡GRACIAS POR SU PREFERENCIA!');

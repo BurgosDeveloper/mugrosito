@@ -21,7 +21,8 @@ const suites = [
   { file: 'test_reopen_and_deliver_flow.js', name: 'Reapertura, Entrega y Liberación Inmediata de Mesas' },
   { file: 'test_guia_md_scenarios.js', name: 'Escenarios Operativos Obligatorios de GUIA.md' },
   { file: 'test_thermal_printing_simulation.js', name: 'Impresión Térmica ESC/POS y Conectividad LAN' },
-  { file: 'test_historical_reports_audit.js', name: 'Auditoría de Reportes Históricos y Días Anteriores' }
+  { file: 'test_historical_reports_audit.js', name: 'Auditoría de Reportes Históricos y Días Anteriores' },
+  { file: 'test_historical_visor_and_receipt_payments.js', name: 'Visor Histórico y Recibo Térmico con Pagos' }
 ];
 
 function checkServer() {

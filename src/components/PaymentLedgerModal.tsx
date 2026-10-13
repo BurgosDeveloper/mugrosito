@@ -404,6 +404,13 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     setError('');
     try {
       await finalizeOrder(order.id);
+      try {
+        if (printOrderReceipt) {
+          await printOrderReceipt(order.id, 'caja');
+        }
+      } catch (printErr) {
+        console.warn('Aviso: fallo menor al imprimir recibo automático en caja:', printErr);
+      }
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Error al finalizar la comanda.');

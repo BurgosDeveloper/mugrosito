@@ -18,6 +18,7 @@ import { reportService } from '../services/reportService';
 import { exportToExcel, ReporteIntervaloData } from '../services/excelExportService';
 import { roundCOP } from '../utils/currencyRounding';
 import { areProteinsDefault, getCleanItemNote, formatRemovedIngredients } from '../utils/burgerProteins';
+import { HistoricalOrdersModal } from '../components/HistoricalOrdersModal';
 import {
   IoCard,
   IoCashOutline,
@@ -33,6 +34,7 @@ import {
   IoSwapHorizontal,
   IoTrashOutline,
   IoPrintOutline,
+  IoSearchOutline,
 } from 'react-icons/io5';
 
 const HISTORIC_PAYMENT_METHODS: PaymentMethod[] = [
@@ -203,6 +205,7 @@ export const CajaPage: React.FC = () => {
   const [reporteIntervaloData, setReporteIntervaloData] = useState<ReporteIntervaloData | null>(null);
   const [isLoadingReporte, setIsLoadingReporte] = useState<boolean>(false);
   const [reporteError, setReporteError] = useState<string>('');
+  const [isHistoricalOrdersModalOpen, setIsHistoricalOrdersModalOpen] = useState<boolean>(false);
 
   const isOrderCredit = (o: Order) => o.paymentStatus === 'credito' || o.paymentMethod === 'Crédito' || (o as any).type === 'credito';
   const isOrderPaidOrCredit = (o: Order) =>
@@ -1888,6 +1891,16 @@ export const CajaPage: React.FC = () => {
 
             <div className="flex flex-wrap gap-3">
               <button
+                type="button"
+                onClick={() => setIsHistoricalOrdersModalOpen(true)}
+                className="px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white font-black text-xs flex items-center gap-2 border border-gray-800 shadow-xs transition-all cursor-pointer"
+                title="Buscar y ver el detalle completo de comandas de días anteriores"
+              >
+                <IoSearchOutline className="text-base text-yellow-400" />
+                <span>🔍 BUSCAR COMANDAS HISTÓRICAS</span>
+              </button>
+
+              <button
                 onClick={() => {
                   setCierreError('');
                   setIsCierreModalOpen(true);
@@ -2783,6 +2796,12 @@ export const CajaPage: React.FC = () => {
             title: title || (type === 'mesa' ? `Mesa #${tableNumber}` : (type === 'delivery' ? 'Delivery' : 'Para Llevar (Pick-Up)'))
           });
         }}
+      />
+
+      {/* Ventana de Búsqueda y Detalle de Comandas Históricas de Días Anteriores */}
+      <HistoricalOrdersModal
+        isOpen={isHistoricalOrdersModalOpen}
+        onClose={() => setIsHistoricalOrdersModalOpen(false)}
       />
 
     </div>

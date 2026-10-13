@@ -40,7 +40,11 @@ async function fetchAllOrders() {
   const { rows: items } = await query(
     `SELECT oi.*, p.default_proteins 
      FROM order_items oi 
-     LEFT JOIN products p ON (oi.product_id = p.id OR LOWER(oi.product_name) = LOWER(p.name))
+     LEFT JOIN LATERAL (
+       SELECT default_proteins FROM products p 
+       WHERE oi.product_id = p.id OR LOWER(oi.product_name) = LOWER(p.name) 
+       LIMIT 1
+     ) p ON TRUE
      WHERE oi.order_id = ANY($1::text[])`,
     [orderIds]
   );

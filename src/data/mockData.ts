@@ -154,6 +154,8 @@ export interface Order {
   waiterName?: string;
   isEdited?: boolean;
   notes?: string;
+  debtorName?: string;
+  archivedAt?: string;
   kitchenNotes?: string;
   shift?: 'manana' | 'noche' | 'ambos';
   deliveryFeeUSD?: number;

@@ -110,6 +110,8 @@ interface AppContextType {
   printReporteIntervalo: (reportType: 'contable' | 'pizzas' | 'ingresos' | 'egresos' | 'cocina', data: any, targetPrinter?: 'cocina' | 'caja' | 'ambas') => Promise<void>;
   printOrderReceipt: (orderId: string, targetPrinter?: 'cocina' | 'caja' | 'ambas') => Promise<void>;
   reprintKitchenOrder: (orderId: string, targetPrinter?: 'cocina' | 'caja' | 'ambas') => Promise<void>;
+  fetchHistoricalOrders: (params?: { from?: string; to?: string; search?: string; type?: string; paymentStatus?: string; limit?: number; offset?: number }) => Promise<Order[]>;
+  fetchHistoricalOrderById: (orderId: string) => Promise<Order | null>;
   getPrintersConfig: () => Promise<DualPrintersConfig>;
   updatePrintersConfig: (config: Partial<DualPrintersConfig>) => Promise<DualPrintersConfig>;
   testPrinter: (targetPrinter: 'cocina' | 'caja' | 'ambas') => Promise<any>;
@@ -833,6 +835,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return data.order;
   };
 
+  const fetchHistoricalOrders = async (paramsObj: { from?: string; to?: string; search?: string; type?: string; paymentStatus?: string; limit?: number; offset?: number } = {}): Promise<Order[]> => {
+    try {
+      const searchParams = new URLSearchParams();
+      if (paramsObj.from) searchParams.append('from', paramsObj.from);
+      if (paramsObj.to) searchParams.append('to', paramsObj.to);
+      if (paramsObj.search) searchParams.append('search', paramsObj.search);
+      if (paramsObj.type) searchParams.append('type', paramsObj.type);
+      if (paramsObj.paymentStatus) searchParams.append('paymentStatus', paramsObj.paymentStatus);
+      if (paramsObj.limit) searchParams.append('limit', String(paramsObj.limit));
+      if (paramsObj.offset) searchParams.append('offset', String(paramsObj.offset));
+
+      const res = await apiFetch(`${backendUrl}/api/orders/historico?${searchParams.toString()}`);
+      if (res.ok) return await res.json();
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error al consultar historial de comandas.');
+    } catch (e: any) {
+      setSyncError(e.message || 'Error al consultar historial de comandas.');
+      throw e;
+    }
+  };
+
+  const fetchHistoricalOrderById = async (orderId: string): Promise<Order | null> => {
+    try {
+      const res = await apiFetch(`${backendUrl}/api/orders/historico/${orderId}`);
+      if (res.ok) return await res.json();
+      return null;
+    } catch (e: any) {
+      return null;
+    }
+  };
+
   const getPrintersConfig = async (): Promise<DualPrintersConfig> => {
     const res = await apiFetch(`${backendUrl}/api/printers/config`);
     return await requireApiSuccess(res, 'No se pudo obtener la configuración de impresoras.');
@@ -1059,6 +1092,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         printReporteIntervalo,
         printOrderReceipt,
         reprintKitchenOrder,
+        fetchHistoricalOrders,
+        fetchHistoricalOrderById,
         getPrintersConfig,
         updatePrintersConfig,
         testPrinter,

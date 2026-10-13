@@ -18,6 +18,100 @@ async function assertOrderAccess(executor, user, orderId) {
   assertShiftAccess(user, rows[0].shift);
 }
 
+async function fetchOrderByIdDetailed(id) {
+  const { rows: orderRows } = await query(`SELECT * FROM orders WHERE id = $1`, [id]);
+  if (orderRows.length === 0) return null;
+  const ord = orderRows[0];
+  const { rows: items } = await query(
+    `SELECT oi.*, p.default_proteins 
+     FROM order_items oi 
+     LEFT JOIN LATERAL (
+       SELECT default_proteins FROM products p 
+       WHERE oi.product_id = p.id OR LOWER(oi.product_name) = LOWER(p.name) 
+       LIMIT 1
+     ) p ON TRUE
+     WHERE oi.order_id = $1`,
+    [id]
+  );
+  const { rows: payments } = await query(`SELECT * FROM order_payments WHERE order_id = $1 ORDER BY created_at ASC`, [id]);
+
+  return {
+    id: ord.id,
+    orderNumber: ord.order_number,
+    type: ord.type,
+    tableNumber: ord.table_number,
+    customerName: ord.customer_name,
+    status: ord.status,
+    paymentStatus: ord.payment_status,
+    paymentMethod: ord.payment_method,
+    totalUSD: parseFloat(ord.total_usd) || 0,
+    totalCOP: parseFloat(ord.total_cop) || (parseFloat(ord.total_usd) > 0 ? Math.round(parseFloat(ord.total_usd) * (parseFloat(ord.cop_rate_at_payment) || 3100)) : 0),
+    paidAmountUSD: parseFloat(ord.paid_amount_usd) || (ord.payment_status === 'pagado' || ord.payment_status === 'credito' ? parseFloat(ord.total_usd) : 0),
+    copRateAtPayment: parseFloat(ord.cop_rate_at_payment) || 3100,
+    bsRateAtPayment: parseFloat(ord.bs_rate_at_payment) || 3.2,
+    waiterName: ord.waiter_name || 'Mesero',
+    kitchenNotes: ord.kitchen_notes,
+    notes: ord.notes || '',
+    debtorName: ord.debtor_name || '',
+    archivedAt: ord.archived_at,
+    isEdited: !!ord.is_edited,
+    mergedFromOrders: ord.merged_from_orders || [],
+    deliveryFeeUSD: parseFloat(ord.delivery_fee_usd) || 0,
+    deliveryFeeCOP: parseFloat(ord.delivery_fee_cop) || 0,
+    shift: ord.shift || 'ambos',
+    createdAt: ord.created_at,
+    updatedAt: ord.updated_at,
+    paymentHistory: payments.map((pm) => ({
+      id: pm.id,
+      orderId: pm.order_id,
+      payerName: pm.payer_name || 'Cliente General',
+      paymentMethod: pm.payment_method,
+      method: pm.payment_method,
+      entryType: (parseFloat(pm.change_given_usd || 0) > 0 || parseFloat(pm.change_given_cop || 0) > 0 || parseFloat(pm.change_given_bs || 0) > 0) ? 'change' : 'payment',
+      currency: (parseFloat(pm.cash_tendered_cop || 0) > 0 || parseFloat(pm.change_given_cop || 0) > 0 || (pm.payment_method && (pm.payment_method.includes('COP') || pm.payment_method.includes('Bancolombia') || pm.payment_method.includes('Nequi'))))
+        ? 'COP'
+        : (parseFloat(pm.cash_tendered_bs || 0) > 0 || parseFloat(pm.change_given_bs || 0) > 0 || (pm.payment_method && (pm.payment_method.includes('Bs') || pm.payment_method.includes('Movil') || pm.payment_method.includes('Debito'))))
+        ? 'Bs'
+        : 'USD',
+      amountPaidUSD: parseFloat(pm.amount_paid_usd) || 0,
+      cashTenderedUSD: parseFloat(pm.cash_tendered_usd) || 0,
+      cashTenderedCOP: parseFloat(pm.cash_tendered_cop) || 0,
+      cashTenderedBs: parseFloat(pm.cash_tendered_bs) || 0,
+      changeGivenUSD: parseFloat(pm.change_given_usd) || 0,
+      changeGivenCOP: parseFloat(pm.change_given_cop) || 0,
+      changeGivenBs: parseFloat(pm.change_given_bs) || 0,
+      copRate: parseFloat(pm.cop_rate) || 3100,
+      bsRate: parseFloat(pm.bs_rate) || 3.2,
+      itemIds: pm.item_ids || [],
+      createdAt: pm.created_at,
+    })),
+    items: items.map((it) => ({
+      id: it.id,
+      productId: it.product_id,
+      productName: it.product_name,
+      price: parseFloat(it.price) || 0,
+      quantity: it.quantity,
+      size: it.size || 'Estándar',
+      isHalfHalf: !!it.is_half_half,
+      halfDetails: typeof it.half_details === 'string' ? safeJsonParseObj(it.half_details) : it.half_details,
+      removedIngredients: it.removed_ingredients || [],
+      proteins: it.proteins || [],
+      defaultProteins: it.default_proteins || [],
+      extras: typeof it.extras_json === 'string' ? safeJsonParse(it.extras_json) : (Array.isArray(it.extras_json) ? it.extras_json : []),
+      sugarPreference: it.sugar_preference || undefined,
+      drinkType: it.drink_type || undefined,
+      category: it.category || undefined,
+      isTakeaway: !!it.is_takeaway,
+      isDelivery: !!it.is_delivery,
+      isCut: !!it.is_cut,
+      cutPreference: it.cut_preference || (it.is_cut ? 'Picada' : 'Entera'),
+      isNewOrModified: !!it.is_new_or_modified,
+      flavor: it.flavor || undefined,
+      notes: it.notes || '',
+    })),
+  };
+}
+
 module.exports = function(io) {
   router.delete('/purge-all', requireRole('admin'), async (req, res) => {
     try {
@@ -52,6 +146,171 @@ module.exports = function(io) {
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Error al obtener comandas' });
+    }
+  });
+
+  router.get('/historico', async (req, res) => {
+    try {
+      const { from, to, search, type, paymentStatus, limit = 100, offset = 0 } = req.query;
+      let sql = `
+        SELECT o.*,
+          COALESCE(
+            (SELECT json_agg(json_build_object(
+              'id', oi.id,
+              'productId', oi.product_id,
+              'productName', oi.product_name,
+              'price', oi.price,
+              'quantity', oi.quantity,
+              'size', oi.size,
+              'isHalfHalf', oi.is_half_half,
+              'halfDetails', oi.half_details,
+              'removedIngredients', oi.removed_ingredients,
+              'extras', oi.extras_json,
+              'sugarPreference', oi.sugar_preference,
+              'drinkType', oi.drink_type,
+              'category', oi.category,
+              'proteins', oi.proteins,
+              'defaultProteins', p.default_proteins,
+              'isTakeaway', oi.is_takeaway,
+              'isDelivery', oi.is_delivery,
+              'isCut', oi.is_cut,
+              'cutPreference', oi.cut_preference,
+              'flavor', oi.flavor,
+              'notes', oi.notes
+            ) ORDER BY oi.id ASC)
+            FROM order_items oi
+            LEFT JOIN LATERAL (
+              SELECT default_proteins FROM products p 
+              WHERE oi.product_id = p.id OR LOWER(oi.product_name) = LOWER(p.name) 
+              LIMIT 1
+            ) p ON TRUE
+            WHERE oi.order_id = o.id
+            ), '[]'::json
+          ) AS items_json,
+          COALESCE(
+            (SELECT json_agg(json_build_object(
+              'id', op.id,
+              'orderId', op.order_id,
+              'payerName', op.payer_name,
+              'paymentMethod', op.payment_method,
+              'method', op.payment_method,
+              'amountPaidUSD', op.amount_paid_usd,
+              'cashTenderedUSD', op.cash_tendered_usd,
+              'cashTenderedCOP', op.cash_tendered_cop,
+              'cashTenderedBs', op.cash_tendered_bs,
+              'changeGivenUSD', op.change_given_usd,
+              'changeGivenCOP', op.change_given_cop,
+              'changeGivenBs', op.change_given_bs,
+              'copRate', op.cop_rate,
+              'bsRate', op.bs_rate,
+              'itemIds', op.item_ids,
+              'createdAt', op.created_at
+            ) ORDER BY op.created_at ASC)
+            FROM order_payments op
+            WHERE op.order_id = o.id
+            ), '[]'::json
+          ) AS payments_json
+        FROM orders o
+        WHERE 1=1
+      `;
+      const params = [];
+
+      if (from) {
+        params.push(new Date(from).toISOString());
+        sql += ` AND o.created_at >= $${params.length}`;
+      }
+      if (to) {
+        params.push(new Date(to).toISOString());
+        sql += ` AND o.created_at <= $${params.length}`;
+      }
+      if (search && search.trim()) {
+        params.push(`%${search.trim().replace(/^#+/, '')}%`);
+        sql += ` AND (o.order_number ILIKE $${params.length} OR o.customer_name ILIKE $${params.length} OR o.debtor_name ILIKE $${params.length})`;
+      }
+      if (type && type !== 'todos') {
+        params.push(type);
+        sql += ` AND o.type = $${params.length}`;
+      }
+      if (paymentStatus && paymentStatus !== 'todos') {
+        params.push(paymentStatus);
+        sql += ` AND o.payment_status = $${params.length}`;
+      }
+
+      sql += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(Math.min(500, Math.max(1, parseInt(limit, 10) || 100)));
+      params.push(Math.max(0, parseInt(offset, 10) || 0));
+
+      const { rows } = await query(sql, params);
+
+      const mapped = rows.map((ord) => ({
+        id: ord.id,
+        orderNumber: ord.order_number,
+        type: ord.type,
+        tableNumber: ord.table_number,
+        customerName: ord.customer_name,
+        status: ord.status,
+        paymentStatus: ord.payment_status,
+        paymentMethod: ord.payment_method,
+        totalUSD: parseFloat(ord.total_usd) || 0,
+        totalCOP: parseFloat(ord.total_cop) || (parseFloat(ord.total_usd) > 0 ? Math.round(parseFloat(ord.total_usd) * (parseFloat(ord.cop_rate_at_payment) || 3100)) : 0),
+        paidAmountUSD: parseFloat(ord.paid_amount_usd) || (ord.payment_status === 'pagado' || ord.payment_status === 'credito' ? parseFloat(ord.total_usd) : 0),
+        copRateAtPayment: parseFloat(ord.cop_rate_at_payment) || 3100,
+        bsRateAtPayment: parseFloat(ord.bs_rate_at_payment) || 3.2,
+        waiterName: ord.waiter_name || 'Mesero',
+        kitchenNotes: ord.kitchen_notes,
+        notes: ord.notes || '',
+        debtorName: ord.debtor_name || '',
+        archivedAt: ord.archived_at,
+        isEdited: !!ord.is_edited,
+        mergedFromOrders: ord.merged_from_orders || [],
+        deliveryFeeUSD: parseFloat(ord.delivery_fee_usd) || 0,
+        deliveryFeeCOP: parseFloat(ord.delivery_fee_cop) || 0,
+        shift: ord.shift || 'ambos',
+        createdAt: ord.created_at,
+        updatedAt: ord.updated_at,
+        items: (ord.items_json || []).map((it) => ({
+          ...it,
+          price: parseFloat(it.price) || 0,
+          quantity: parseInt(it.quantity, 10) || 1,
+          extras: typeof it.extras === 'string' ? safeJsonParse(it.extras) : (Array.isArray(it.extras) ? it.extras : []),
+          halfDetails: typeof it.halfDetails === 'string' ? safeJsonParseObj(it.halfDetails) : it.halfDetails,
+        })),
+        paymentHistory: (ord.payments_json || []).map((pm) => ({
+          ...pm,
+          amountPaidUSD: parseFloat(pm.amountPaidUSD) || 0,
+          cashTenderedUSD: parseFloat(pm.cashTenderedUSD) || 0,
+          cashTenderedCOP: parseFloat(pm.cashTenderedCOP) || 0,
+          cashTenderedBs: parseFloat(pm.cashTenderedBs) || 0,
+          changeGivenUSD: parseFloat(pm.changeGivenUSD) || 0,
+          changeGivenCOP: parseFloat(pm.changeGivenCOP) || 0,
+          changeGivenBs: parseFloat(pm.changeGivenBs) || 0,
+          copRate: parseFloat(pm.copRate) || 3100,
+          bsRate: parseFloat(pm.bsRate) || 3.2,
+          entryType: (parseFloat(pm.changeGivenUSD || 0) > 0 || parseFloat(pm.changeGivenCOP || 0) > 0 || parseFloat(pm.changeGivenBs || 0) > 0) ? 'change' : 'payment',
+          currency: (parseFloat(pm.cashTenderedCOP || 0) > 0 || parseFloat(pm.changeGivenCOP || 0) > 0 || (pm.paymentMethod && (pm.paymentMethod.includes('COP') || pm.paymentMethod.includes('Bancolombia') || pm.paymentMethod.includes('Nequi'))))
+            ? 'COP'
+            : (parseFloat(pm.cashTenderedBs || 0) > 0 || parseFloat(pm.changeGivenBs || 0) > 0 || (pm.paymentMethod && (pm.paymentMethod.includes('Bs') || pm.paymentMethod.includes('Movil') || pm.paymentMethod.includes('Debito'))))
+            ? 'Bs'
+            : 'USD',
+        })),
+      }));
+
+      res.json(mapped);
+    } catch (err) {
+      console.error('Error al obtener histórico de comandas:', err);
+      res.status(500).json({ error: 'Error al consultar historial de comandas' });
+    }
+  });
+
+  router.get('/historico/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const order = await fetchOrderByIdDetailed(id);
+      if (!order) return res.status(404).json({ error: 'Comanda histórica no encontrada' });
+      res.json(order);
+    } catch (err) {
+      console.error('Error al obtener detalle de comanda histórica:', err);
+      res.status(500).json({ error: 'Error al consultar comanda' });
     }
   });
 
@@ -750,7 +1009,11 @@ module.exports = function(io) {
       const { id } = req.params;
       const { targetPrinter = 'caja' } = req.body || {};
       const allOrders = await fetchAllOrders(req.user);
-      const targetOrder = allOrders.find((o) => o.id === id);
+      let targetOrder = allOrders.find((o) => o.id === id);
+
+      if (!targetOrder) {
+        targetOrder = await fetchOrderByIdDetailed(id);
+      }
 
       if (!targetOrder) {
         return res.status(404).json({ error: 'Comanda no encontrada.' });
@@ -1359,7 +1622,11 @@ module.exports = function(io) {
       const { rows: items } = await query(
         `SELECT oi.*, p.default_proteins 
          FROM order_items oi 
-         LEFT JOIN products p ON (oi.product_id = p.id OR LOWER(oi.product_name) = LOWER(p.name))
+         LEFT JOIN LATERAL (
+           SELECT default_proteins FROM products p 
+           WHERE oi.product_id = p.id OR LOWER(oi.product_name) = LOWER(p.name) 
+           LIMIT 1
+         ) p ON TRUE
          WHERE oi.order_id = $1`,
         [id]
       );

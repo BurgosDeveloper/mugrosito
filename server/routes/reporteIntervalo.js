@@ -116,7 +116,11 @@ module.exports = function (io) {
         const { rows } = await query(
           `SELECT oi.*, o.order_number, o.total_usd, o.total_cop, o.cop_rate_at_payment, o.bs_rate_at_payment, COALESCE(NULLIF(oi.category, ''), p.category, 'Sin categoría') AS category FROM order_items oi
            JOIN orders o ON o.id = oi.order_id
-           LEFT JOIN products p ON (p.id = oi.product_id OR LOWER(p.name) = LOWER(oi.product_name))
+           LEFT JOIN LATERAL (
+             SELECT category FROM products p 
+             WHERE p.id = oi.product_id OR LOWER(p.name) = LOWER(oi.product_name)
+             LIMIT 1
+           ) p ON TRUE
            WHERE oi.order_id = ANY($1::text[])`,
           [orderIds]
         );
