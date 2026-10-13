@@ -24,7 +24,8 @@ const suites = [
   { file: 'test_historical_reports_audit.js', name: 'Auditoría de Reportes Históricos y Días Anteriores' },
   { file: 'test_historical_visor_and_receipt_payments.js', name: 'Visor Histórico y Recibo Térmico con Pagos' },
   { file: 'test_stress_production_reliability.js', name: 'Estrés y Perfección Operativa en Producción' },
-  { file: 'test_comprehensive_deep_edge_cases.js', name: 'Casos Extremos, Concurrencia y División de Ítems' }
+  { file: 'test_comprehensive_deep_edge_cases.js', name: 'Casos Extremos, Concurrencia y División de Ítems' },
+  { file: 'test_rate_persistence_and_fast_finalize.js', name: 'Persistencia de Tasas y Finalización Instantánea' }
 ];
 
 function checkServer() {

@@ -10,13 +10,27 @@ export const ExchangeRateModal: React.FC<ExchangeRateModalProps> = ({ onClose })
   const { exchangeRates, updateExchangeRates } = useApp();
   const [copRate, setCopRate] = useState<number>(exchangeRates.COP);
   const [bsRate, setBsRate] = useState<number>(exchangeRates.Bs);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string>('');
 
-  const handleSave = () => {
-    updateExchangeRates({
-      COP: copRate,
-      Bs: bsRate,
-    });
-    onClose();
+  const handleSave = async () => {
+    if (!copRate || copRate <= 0 || !bsRate || bsRate <= 0) {
+      setErrorMsg('Las tasas COP y Bs deben ser números mayores a cero.');
+      return;
+    }
+    setIsSaving(true);
+    setErrorMsg('');
+    try {
+      await updateExchangeRates({
+        COP: copRate,
+        Bs: bsRate,
+      });
+      onClose();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Error al guardar las tasas de cambio.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -90,18 +104,29 @@ export const ExchangeRateModal: React.FC<ExchangeRateModalProps> = ({ onClose })
               </span>
             </div>
           </div>
+          {/* Mensaje de error si ocurre */}
+          {errorMsg && (
+            <div className="p-2.5 bg-red-100 border border-red-300 rounded-xl text-red-800 text-xs font-bold">
+              {errorMsg}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
-          <button onClick={onClose} className="text-xs font-bold text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors">
+          <button
+            onClick={onClose}
+            disabled={isSaving}
+            className="text-xs font-bold text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+          >
             Cancelar
           </button>
           <button
             onClick={handleSave}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black border border-yellow-500 font-black px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-[0.98]"
+            disabled={isSaving}
+            className="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 text-black border border-yellow-500 font-black px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-[0.98] cursor-pointer"
           >
-            <IoCheckmark className="text-base" /> Guardar Tasas
+            <IoCheckmark className="text-base" /> {isSaving ? 'Guardando...' : 'Guardar Tasas'}
           </button>
         </div>
 

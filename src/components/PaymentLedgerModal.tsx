@@ -404,17 +404,16 @@ export const PaymentLedgerModal: React.FC<PaymentLedgerModalProps> = ({
     setError('');
     try {
       await finalizeOrder(order.id);
-      try {
-        if (printOrderReceipt) {
-          await printOrderReceipt(order.id, 'caja');
-        }
-      } catch (printErr) {
-        console.warn('Aviso: fallo menor al imprimir recibo automático en caja:', printErr);
-      }
+      // Cierre inmediato de la interfaz para máxima velocidad (sin demoras ni esperas de red)
       onClose();
+      // Impresión de recibo térmico en segundo plano sin bloquear al cajero
+      if (printOrderReceipt) {
+        printOrderReceipt(order.id, 'caja').catch((printErr) => {
+          console.warn('Aviso: fallo menor al imprimir recibo automático en caja:', printErr);
+        });
+      }
     } catch (err: any) {
       setError(err?.message || 'Error al finalizar la comanda.');
-    } finally {
       setIsSubmitting(false);
     }
   };

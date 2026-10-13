@@ -177,10 +177,10 @@ async function initDb() {
 
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_cop NUMERIC(12, 2) DEFAULT 0.00;`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee_cop NUMERIC(12, 2) DEFAULT 0.00;`,
-      `INSERT INTO exchange_rates (id, cop_rate, bs_rate) VALUES (1, 3100.00, 3.20) ON CONFLICT (id) DO UPDATE SET cop_rate = EXCLUDED.cop_rate, bs_rate = EXCLUDED.bs_rate;`,
-      `INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('ambos', 3100.00, 3.20, 'Inicial Mugrosito') ON CONFLICT (shift) DO UPDATE SET cop_rate = EXCLUDED.cop_rate, bs_rate = EXCLUDED.bs_rate;`,
-      `INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('manana', 3100.00, 3.20, 'Compatibilidad') ON CONFLICT (shift) DO UPDATE SET cop_rate = EXCLUDED.cop_rate, bs_rate = EXCLUDED.bs_rate;`,
-      `INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('noche', 3100.00, 3.20, 'Compatibilidad') ON CONFLICT (shift) DO UPDATE SET cop_rate = EXCLUDED.cop_rate, bs_rate = EXCLUDED.bs_rate;`,
+      `INSERT INTO exchange_rates (id, cop_rate, bs_rate) VALUES (1, 3100.00, 3.20) ON CONFLICT (id) DO NOTHING;`,
+      `INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('ambos', 3100.00, 3.20, 'Inicial Mugrosito') ON CONFLICT (shift) DO NOTHING;`,
+      `INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('manana', 3100.00, 3.20, 'Compatibilidad') ON CONFLICT (shift) DO NOTHING;`,
+      `INSERT INTO shift_exchange_rates (shift, cop_rate, bs_rate, updated_by) VALUES ('noche', 3100.00, 3.20, 'Compatibilidad') ON CONFLICT (shift) DO NOTHING;`,
       `INSERT INTO system_settings (key, value) VALUES ('admin_pin', '1234') ON CONFLICT (key) DO NOTHING;`,
 
       `INSERT INTO users (id, username, password, role, name, shift) VALUES
