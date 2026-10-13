@@ -23,7 +23,8 @@ const suites = [
   { file: 'test_thermal_printing_simulation.js', name: 'Impresión Térmica ESC/POS y Conectividad LAN' },
   { file: 'test_historical_reports_audit.js', name: 'Auditoría de Reportes Históricos y Días Anteriores' },
   { file: 'test_historical_visor_and_receipt_payments.js', name: 'Visor Histórico y Recibo Térmico con Pagos' },
-  { file: 'test_stress_production_reliability.js', name: 'Estrés y Perfección Operativa en Producción' }
+  { file: 'test_stress_production_reliability.js', name: 'Estrés y Perfección Operativa en Producción' },
+  { file: 'test_comprehensive_deep_edge_cases.js', name: 'Casos Extremos, Concurrencia y División de Ítems' }
 ];
 
 function checkServer() {

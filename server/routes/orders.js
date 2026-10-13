@@ -108,6 +108,8 @@ async function fetchOrderByIdDetailed(id) {
       isNewOrModified: !!it.is_new_or_modified,
       flavor: it.flavor || undefined,
       notes: it.notes || '',
+      isPaidIndividually: !!it.is_paid_individually,
+      paidByName: it.paid_by_name || undefined,
     })),
   };
 }
@@ -634,7 +636,7 @@ module.exports = function(io) {
       await client.query('BEGIN');
       await assertOrderAccess(client, req.user, id);
       const { rows } = await client.query(
-        `UPDATE orders SET status = 'cancelado', updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id`,
+        `UPDATE orders SET status = 'cancelado', updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, type, table_number`,
         [id]
       );
       if (rows.length === 0) {
@@ -643,17 +645,31 @@ module.exports = function(io) {
         client = null;
         return res.status(404).json({ error: 'Comanda no encontrada.' });
       }
+
+      const cancelledRow = rows[0];
+      if (cancelledRow && cancelledRow.type === 'mesa' && cancelledRow.table_number) {
+        const { rows: otherOrders } = await client.query(
+          `SELECT id FROM orders WHERE type = 'mesa' AND table_number = $1 AND id != $2 AND status NOT IN ('entregada', 'cancelado', 'fusionada') AND payment_status != 'credito' AND archived_at IS NULL`,
+          [cancelledRow.table_number, id]
+        );
+        if (otherOrders.length === 0) {
+          await client.query(`UPDATE tables_config SET status = 'libre' WHERE number = $1`, [cancelledRow.table_number]);
+        }
+      }
+
       const cashLedgerResult = await postCompletedOrderCashMovements(client, id);
       await client.query('COMMIT');
       client.release();
       client = null;
 
       const allOrders = await fetchAllOrders(req.user);
+      const allTables = await fetchAllTables(req.user);
       const cancelledOrder = allOrders.find((o) => o.id === id);
 
       io.emit('order:cancelled', cancelledOrder);
       io.emit('order:cancelled_sound', cancelledOrder);
       io.emit('orders:sync', allOrders);
+      io.emit('tables:sync', allTables);
       if (cashLedgerResult.posted || cashLedgerResult.removed) io.emit('caja:updated');
 
       console.log(`🚫 [COMANDA CANCELADA] ${cancelledOrder?.orderNumber || id} - Alerta sonora enviada a Cocina`);
